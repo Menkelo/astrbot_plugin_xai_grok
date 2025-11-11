@@ -101,8 +101,8 @@ class GrokVideoPlugin(Star):
             logger.debug(f"读取 callback_api_base 失败: {e}")
         return None
 
-    def _check_group_access(self, event: AstrMessageEvent) -> Optional[str]:
-        """检查群组访问权限和速率限制"""
+    async def _check_group_access(self, event: AstrMessageEvent) -> Optional[str]:
+        """检查群组访问权限和速率限制（并发安全）"""
         try:
             group_id = None
             try:
@@ -117,29 +117,31 @@ class GrokVideoPlugin(Star):
                 if self.group_control_mode == "blacklist" and group_id in self.group_list:
                     return "当前群组已被限制使用视频生成功能"
 
-                # 速率限制检查（仅对群组）- 使用锁确保并发安全
+                # 速率限制检查（仅对群组）- 使用异步锁确保并发安全
                 if self.rate_limit_enabled:
                     # 获取或创建该群组的锁
                     if group_id not in self._rate_limit_locks:
                         self._rate_limit_locks[group_id] = asyncio.Lock()
                     
-                    # 注意：这里不能使用async with，因为这个方法不是async的
-                    # 改为同步检查，如果需要严格的并发控制，需要将此方法改为async
-                    now = time.time()
-                    bucket = self._rate_limit_bucket.get(group_id, {"window_start": now, "count": 0})
-                    window_start = bucket.get("window_start", now)
-                    count = int(bucket.get("count", 0))
-                    
-                    if now - window_start >= self.rate_limit_window_seconds:
-                        window_start = now
-                        count = 0
-                    
-                    if count >= self.rate_limit_max_calls:
-                        return f"本群调用已达上限（{self.rate_limit_max_calls}次/{self.rate_limit_window_seconds}秒），请稍后再试"
-                    
-                    # 预占位+1
-                    bucket["window_start"], bucket["count"] = window_start, count + 1
-                    self._rate_limit_bucket[group_id] = bucket
+                    # 正确使用异步锁保护临界区
+                    async with self._rate_limit_locks[group_id]:
+                        now = time.time()
+                        bucket = self._rate_limit_bucket.get(group_id, {"window_start": now, "count": 0})
+                        window_start = bucket.get("window_start", now)
+                        count = int(bucket.get("count", 0))
+                        
+                        # 检查是否需要重置窗口
+                        if now - window_start >= self.rate_limit_window_seconds:
+                            window_start = now
+                            count = 0
+                        
+                        # 检查是否超过限制
+                        if count >= self.rate_limit_max_calls:
+                            return f"本群调用已达上限（{self.rate_limit_max_calls}次/{self.rate_limit_window_seconds}秒），请稍后再试"
+                        
+                        # 原子性更新计数器
+                        bucket["window_start"], bucket["count"] = window_start, count + 1
+                        self._rate_limit_bucket[group_id] = bucket
 
         except Exception as e:
             logger.error(f"群组访问检查失败: {e}")
@@ -242,41 +244,16 @@ class GrokVideoPlugin(Star):
                             result = response.json()
                             logger.debug(f"解析的JSON响应: {result}")
                             
-                            # 解析响应获取视频URL
-                            if "choices" in result and len(result["choices"]) > 0:
-                                content = result["choices"][0].get("message", {}).get("content", "")
-                                logger.debug(f"API返回内容: {content[:200]}...")  # 只记录前200字符用于调试
-                                
-                                # 查找视频标签 - 支持多种格式
-                                video_url = None
-                                
-                                # 方式1: 查找 <video src="...">
-                                if "<video" in content and "src=" in content:
-                                    video_match = re.search(r'src=["\']([^"\'>]+)["\']', content)
-                                    if video_match:
-                                        video_url = video_match.group(1)
-                                
-                                # 方式2: 查找直接的URL（如果没有video标签）
-                                if not video_url:
-                                    # 查找http开头的URL
-                                    url_match = re.search(r'(https?://[^\s<>"\')]+\.mp4)', content)
-                                    if url_match:
-                                        video_url = url_match.group(1)
-                                
-                                # 方式3: 查找markdown格式的视频链接
-                                if not video_url:
-                                    md_match = re.search(r'\[.*?\]\((https?://[^\s)]+\.mp4)\)', content)
-                                    if md_match:
-                                        video_url = md_match.group(1)
-                                
-                                if video_url:
-                                    logger.info(f"成功提取到视频URL: {video_url}")
-                                    return video_url, None
-                                else:
-                                    logger.warning(f"未能从API响应中提取到视频URL，内容: {content[:100]}...")
-                                    return None, f"API响应中未包含有效的视频URL: {content[:100]}..."
+                            # 解析响应获取视频URL - 重构为更健壮的方式
+                            video_url, parse_error = self._extract_video_url_from_response(result)
+                            if parse_error:
+                                return None, parse_error
+                            
+                            if video_url:
+                                logger.info(f"成功提取到视频URL: {video_url}")
+                                return video_url, None
                             else:
-                                return None, f"API响应格式错误: {result}"
+                                return None, "API响应中未包含有效的视频URL"
                         except json.JSONDecodeError as e:
                             return None, f"API响应JSON解析失败: {str(e)}, 响应内容: {response_text[:200]}"
                     
@@ -318,6 +295,183 @@ class GrokVideoPlugin(Star):
                 await asyncio.sleep(1)
         
         return None, "所有重试均失败"
+
+    def _extract_video_url_from_response(self, response_data: dict) -> Tuple[Optional[str], Optional[str]]:
+        """
+        从 API 响应中提取视频 URL，采用更健墮的解析策略
+        
+        返回: (video_url, error_message)
+        """
+        try:
+            # 1. 首先检查响应结构是否符合预期
+            if not isinstance(response_data, dict):
+                return None, f"无效的响应格式: {type(response_data)}"
+            
+            if "choices" not in response_data or not response_data["choices"]:
+                return None, "API响应中缺少 choices 字段"
+            
+            # 2. 提取内容
+            choice = response_data["choices"][0]
+            if not isinstance(choice, dict) or "message" not in choice:
+                return None, "choices[0] 缺少 message 字段"
+            
+            message = choice["message"]
+            if not isinstance(message, dict) or "content" not in message:
+                return None, "message 缺少 content 字段"
+            
+            content = message["content"]
+            if not isinstance(content, str):
+                return None, f"content 不是字符串类型: {type(content)}"
+            
+            logger.debug(f"API返回内容长度: {len(content)} 字符")
+            
+            # 3. 优先尝试结构化解析（如果 API 支持）
+            video_url = self._try_structured_extraction(response_data)
+            if video_url:
+                return video_url, None
+            
+            # 4. 如果结构化解析失败，使用改进的文本解析
+            video_url = self._try_content_extraction(content)
+            if video_url:
+                return video_url, None
+            
+            # 5. 所有方法都失败
+            logger.warning(f"无法从响应中提取视频URL，内容片段: {content[:200]}...")
+            return None, f"未能从 API 响应中提取到有效的视频 URL"
+            
+        except Exception as e:
+            logger.error(f"URL 提取过程中发生异常: {e}")
+            return None, f"URL 提取失败: {str(e)}"
+    
+    def _try_structured_extraction(self, response_data: dict) -> Optional[str]:
+        """
+        尝试从结构化数据中提取 URL（为未来 API 改进做准备）
+        """
+        try:
+            # 检查是否有直接的 video_url 字段
+            if "video_url" in response_data:
+                url = response_data["video_url"]
+                if isinstance(url, str) and url.startswith(("http://", "https://")):
+                    logger.info("使用结构化 video_url 字段")
+                    return url
+            
+            # 检查 choices[0].message 中是否有结构化数据
+            choice = response_data.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            
+            # 检查是否有 attachments 或 media 字段
+            for field in ["attachments", "media", "files"]:
+                if field in message and isinstance(message[field], list):
+                    for item in message[field]:
+                        if isinstance(item, dict) and "url" in item:
+                            url = item["url"]
+                            if isinstance(url, str) and url.endswith(".mp4"):
+                                logger.info(f"使用结构化 {field} 字段")
+                                return url
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"结构化提取失败: {e}")
+            return None
+    
+    def _try_content_extraction(self, content: str) -> Optional[str]:
+        """
+        从文本内容中提取 URL，使用改进的策略
+        """
+        try:
+            # 策略 1: 查找最常见的 HTML video 标签
+            video_url = self._extract_from_html_tag(content)
+            if video_url:
+                return video_url
+            
+            # 策略 2: 查找直接的 .mp4 URL
+            video_url = self._extract_direct_url(content)
+            if video_url:
+                return video_url
+            
+            # 策略 3: 查找 Markdown 格式链接
+            video_url = self._extract_from_markdown(content)
+            if video_url:
+                return video_url
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"内容提取失败: {e}")
+            return None
+    
+    def _extract_from_html_tag(self, content: str) -> Optional[str]:
+        """从 HTML video 标签中提取 URL"""
+        if "<video" not in content or "src=" not in content:
+            return None
+        
+        # 更宽松的正则，支持多种引号和空格
+        patterns = [
+            r'<video[^>]*src=["\']([^"\'>]+)["\'][^>]*>',  # 标准 video 标签
+            r'src=["\']([^"\'>]+\.mp4[^"\'>]*)["\']',      # 任意 src 属性
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                url = match.group(1)
+                if self._is_valid_video_url(url):
+                    logger.debug(f"从 HTML 标签提取到 URL: {url}")
+                    return url
+        
+        return None
+    
+    def _extract_direct_url(self, content: str) -> Optional[str]:
+        """提取直接的 .mp4 URL"""
+        # 更精确的 URL 正则，避免误匹配
+        pattern = r'(https?://[^\s<>"\')\]\}]+\.mp4(?:\?[^\s<>"\')\]\}]*)?)'
+        
+        matches = re.findall(pattern, content, re.IGNORECASE)
+        for url in matches:
+            if self._is_valid_video_url(url):
+                logger.debug(f"提取到直接 URL: {url}")
+                return url
+        
+        return None
+    
+    def _extract_from_markdown(self, content: str) -> Optional[str]:
+        """从 Markdown 链接中提取 URL"""
+        # Markdown 格式: [text](url) 或 ![alt](url)
+        patterns = [
+            r'!?\[[^\]]*\]\(([^\)]+\.mp4[^\)]*)\)',  # Markdown 链接
+            r'!?\[[^\]]*\]:\s*([^\s]+\.mp4[^\s]*)',   # Markdown 引用式链接
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                url = match.group(1)
+                if self._is_valid_video_url(url):
+                    logger.debug(f"从 Markdown 提取到 URL: {url}")
+                    return url
+        
+        return None
+    
+    def _is_valid_video_url(self, url: str) -> bool:
+        """验证 URL 是否为有效的视频 URL"""
+        if not isinstance(url, str) or len(url) < 10:
+            return False
+        
+        # 检查协议
+        if not url.startswith(("http://", "https://")):
+            return False
+        
+        # 检查文件扩展名
+        if not url.lower().endswith(".mp4") and ".mp4" not in url.lower():
+            return False
+        
+        # 检查是否包含明显的非法字符
+        invalid_chars = ['<', '>', '"', "'", '\n', '\r', '\t']
+        if any(char in url for char in invalid_chars):
+            return False
+        
+        return True
 
     async def _download_video(self, video_url: str) -> Optional[str]:
         """下载视频到本地"""
@@ -503,7 +657,7 @@ class GrokVideoPlugin(Star):
     async def cmd_generate_video(self, event: AstrMessageEvent, *, prompt: str):
         """生成视频：/视频 <提示词>（需要包含图片）"""
         # 群组访问检查
-        access_error = self._check_group_access(event)
+        access_error = await self._check_group_access(event)
         if access_error:
             yield event.plain_result(access_error)
             return
