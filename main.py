@@ -33,17 +33,17 @@ class GrokMediaPlugin(Star):
         self.config = config
         
         # API配置
-        self.server_url = config.get("server_url").rstrip('/')
-        self.video_model_id = config.get("model_id")
-        self.image_model_id = config.get("image_model_id")
-        self.api_key = config.get("api_key")
+        self.server_url = config.get("server_url", "http://127.0.0.1:8000").rstrip('/')
+        self.video_model_id = config.get("model_id", "grok-imagine-0.9")
+        self.image_model_id = config.get("image_model_id", "grok-4.1-thinking")
+        self.api_key = config.get("api_key", "")
         
         # 请求配置 (内嵌默认值)
         self.timeout_seconds = 180
         self.max_retry_attempts = 3
         
-        # 10MB 阈值
-        self.max_image_size = 10 * 1024 * 1024 
+        # 5MB 阈值 (Base64膨胀后约6.6MB，避免触碰服务端10MB限制)
+        self.max_image_size = 5 * 1024 * 1024 
         
         # 强制不保留文件，发送后自动清理
         self.save_video_enabled = False
@@ -145,8 +145,8 @@ class GrokMediaPlugin(Star):
                 save_kwargs = {"format": "JPEG"}
                 if is_too_large:
                     # 限制最大分辨率，防止过大
-                    img.thumbnail((2560, 2560), PILImage.Resampling.LANCZOS)
-                    save_kwargs["quality"] = 85  # 稍微压缩
+                    img.thumbnail((2048, 2048), PILImage.Resampling.LANCZOS)
+                    save_kwargs["quality"] = 80  # 稍微压缩
                     logger.info(f"图片过大({original_size/1024/1024:.2f}MB)，已压缩并调整尺寸")
                 else:
                     # 保持极高画质
@@ -231,6 +231,7 @@ class GrokMediaPlugin(Star):
         }
         
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
+        # 增加读取超时，视频生成可能很慢
         timeout_config = httpx.Timeout(connect=20.0, read=self.timeout_seconds, write=60.0, pool=self.timeout_seconds + 10)
         last_error = "未知错误"
         
@@ -252,32 +253,51 @@ class GrokMediaPlugin(Star):
                             logger.error(f"提取媒体链接失败: {parse_error}")
                             last_error = parse_error or "未找到媒体链接"
                         except json.JSONDecodeError: last_error = "JSON解析失败"
+                    
                     elif response.status_code == 429:
-                        logger.warning("当前账号触发限流 (429)，正在尝试切换账号重试...")
+                        logger.warning("当前账号触发限流 (429)，等待 15s 后重试...")
                         last_error = "触发限流 (429)，正在重试..."
-                    elif response.status_code == 403: return None, "API鉴权失败(403)"
+                        await asyncio.sleep(15) # 429 需要等待较长时间
+                        continue
+
+                    elif response.status_code == 403: 
+                        return None, "API鉴权失败(403)，请检查API Key"
+                    
                     elif response.status_code == 500:
                         error_text = response.text
                         logger.error(f"API 500 详情: {error_text}")
                         
-                        # 检测 500 错误中是否包含 429
+                        # 解析 500 错误
                         if "429" in error_text:
-                            logger.warning("检测到上游服务返回 429 限流，将尝试重试...")
-                            last_error = "触发限流 (429)，正在重试..."
+                            last_error = "上游服务限流 (429)"
+                        elif "void *" in error_text or "NoneType" in error_text:
+                            last_error = "服务端浏览器实例崩溃，正在重试..."
+                            # 这种错误通常需要时间恢复
+                            await asyncio.sleep(10)
+                            continue
                         elif "list index out of range" in error_text: 
-                            last_error = "服务端处理失败(500)"
-                        elif "请求错误" in error_text: 
-                            last_error = f"Grok请求被拒绝: {error_text[:100]}"
-                        else: 
-                            last_error = f"服务端错误(500): {error_text[:50]}"
-                    else: last_error = f"API请求失败({response.status_code})"
+                            last_error = "服务端处理失败"
+                        else:
+                            # 尝试解析 JSON 错误
+                            try:
+                                err_json = response.json()
+                                if "error" in err_json:
+                                    last_error = f"服务端错误: {err_json['error']}"
+                                else:
+                                    last_error = f"服务端错误(500): {error_text[:100]}"
+                            except:
+                                last_error = f"服务端错误(500): {error_text[:50]}"
+                    else: 
+                        last_error = f"API请求失败({response.status_code})"
                 
+                # 普通重试间隔
                 if attempt < self.max_retry_attempts - 1:
-                    wait_time = 8 if "429" in last_error else 3 * (attempt + 1)
+                    wait_time = 5 * (attempt + 1)
+                    logger.info(f"请求失败，{wait_time}秒后重试...")
                     await asyncio.sleep(wait_time)
             except Exception as e:
                 last_error = f"请求异常: {str(e)}"
-                if attempt < self.max_retry_attempts - 1: await asyncio.sleep(2)
+                if attempt < self.max_retry_attempts - 1: await asyncio.sleep(3)
         
         return None, last_error
 
@@ -325,6 +345,10 @@ class GrokMediaPlugin(Star):
         except Exception as e: return None, f"提取异常: {e}"
 
     async def _download_file(self, url: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        下载文件，支持鉴权和自动重试
+        返回: (local_path, error_msg_or_mime)
+        """
         try:
             parsed = urlparse(url)
             path = parsed.path
@@ -336,32 +360,70 @@ class GrokMediaPlugin(Star):
             
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                "Referer": "https://grok.com/",
             }
             cookies = {}
-            if "grok.com" in parsed.netloc and self.api_key and len(self.api_key) > 50:
-                 cookies = {"sso": self.api_key, "sso-rw": self.api_key}
+            
+            # --- 鉴权逻辑 ---
+            is_self_hosted = False
+            try:
+                # 检查下载链接的主机是否与配置的API服务器主机一致
+                server_netloc = urlparse(self.server_url).netloc
+                if parsed.netloc == server_netloc:
+                    is_self_hosted = True
+            except: pass
 
-            async with self._create_client(httpx.Timeout(300.0)) as client:
-                response = await client.get(url, headers=headers, cookies=cookies)
-                response.raise_for_status()
-                content_type = response.headers.get("Content-Type", "")
-                if content_type:
-                    guess_ext = mimetypes.guess_extension(content_type.split(';')[0])
-                    if guess_ext and guess_ext != ext and guess_ext not in ['.html', '.htm']: 
-                        file_path = file_path.with_suffix(guess_ext)
-                
-                async with aiofiles.open(file_path, 'wb') as f:
-                    await f.write(response.content)
+            if is_self_hosted:
+                # 自建服务：通常需要 API Key 才能访问静态资源
+                if self.api_key:
+                    headers["Authorization"] = f"Bearer {self.api_key}"
+                # 避免发送错误的 Referer
+                headers["Referer"] = self.server_url
+            elif "grok.com" in parsed.netloc:
+                # 官方服务：需要 Cookie 和 Referer
+                headers["Referer"] = "https://grok.com/"
+                if self.api_key and len(self.api_key) > 50:
+                     cookies = {"sso": self.api_key, "sso-rw": self.api_key}
+
+            # --- 下载逻辑 ---
+            async def do_download(target_url):
+                async with self._create_client(httpx.Timeout(300.0)) as client:
+                    response = await client.get(target_url, headers=headers, cookies=cookies)
+                    response.raise_for_status()
+                    content_type = response.headers.get("Content-Type", "")
                     
-                return str(file_path.resolve()), content_type
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 403: return None, "403"
-            logger.error(f"下载HTTP错误: {e}")
-            return None, None
+                    final_path = file_path
+                    if content_type:
+                        guess_ext = mimetypes.guess_extension(content_type.split(';')[0])
+                        if guess_ext and guess_ext != ext and guess_ext not in ['.html', '.htm']: 
+                            final_path = file_path.with_suffix(guess_ext)
+                    
+                    async with aiofiles.open(final_path, 'wb') as f:
+                        await f.write(response.content)
+                    return str(final_path.resolve()), content_type
+
+            try:
+                return await do_download(url)
+            except Exception as e:
+                # 失败回退：如果原始链接下载失败，且是自建服务，尝试强制使用配置的 server_url 拼接路径重试
+                if is_self_hosted:
+                    return None, f"下载失败({e})"
+                
+                # 如果不是自建服务，或者 URL 看起来不对，尝试回退
+                try:
+                    server_parsed = urlparse(self.server_url)
+                    if parsed.netloc != server_parsed.netloc:
+                        logger.warning(f"直接下载失败: {e}，尝试使用配置的 Server URL Host 重试...")
+                        fallback_url = urljoin(self.server_url, path)
+                        return await do_download(fallback_url)
+                except: pass
+
+                if isinstance(e, httpx.HTTPStatusError):
+                    return None, f"HTTP {e.response.status_code}"
+                return None, str(e)
+
         except Exception as e:
-            logger.error(f"下载失败: {e}")
-            return None, None
+            logger.error(f"下载流程异常: {e}")
+            return None, str(e)
 
     async def _cleanup_file(self, path: Optional[str]):
         # self.save_video_enabled 始终为 False，因此总是执行清理
@@ -421,12 +483,17 @@ class GrokMediaPlugin(Star):
                     await event.send(event.plain_result(f"❌ {error}"))
                 return
 
-            local_path, mime = await self._download_file(url)
+            # download_file 现在返回 (path, mime_or_error)
+            local_path, mime_or_err = await self._download_file(url)
             
             if not local_path:
                 msg = "⚠️ 资源已生成，但下载失败。\n"
-                if mime == "403": msg += "原因：403 Forbidden (无权访问 Grok 原始链接，可能是链接已失效或需要签名)。\n"
-                msg += f"\n🔗 原始链接：{url}"
+                if mime_or_err == "403" or mime_or_err == "HTTP 403": 
+                    msg += "原因：403 Forbidden (无权访问链接，已尝试添加API Key但仍失败)。\n"
+                elif mime_or_err:
+                    msg += f"原因：{mime_or_err}\n"
+                
+                # 已删除：拼接原始链接的代码
                 await event.send(event.plain_result(msg))
                 return
 
@@ -452,7 +519,6 @@ class GrokMediaPlugin(Star):
                     except Exception: pass
                     
                     chain.append(component)
-                    # 已移除文字后缀
                     
                     await asyncio.wait_for(
                         event.send(event.chain_result(chain)),
