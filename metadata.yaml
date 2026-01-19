@@ -1,11 +1,6 @@
-name: astrbot_plugin_grok_video
-description: 基于grok2api的图生视频插件
+name: astrbot_plugin_xai_grok
+display_name: Grok-Imagine
+desc: 基于Grok2API的文生图，图生图/视频插件
 version: 1.0.0
-author: ShiHao
-repo: https://github.com/lixin0229/astrbot_plugin_grok_video
-plugin_type: platform
-entry: main.py
-requirements:
-  - httpx>=0.24.0
-  - aiofiles>=23.0.0
-
+author: jengaklll-a11y
+repo: https://github.com/jengaklll-a11y/astrbot_plugin_xai_grok
