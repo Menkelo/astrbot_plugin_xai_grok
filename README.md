@@ -117,6 +117,7 @@ pip install httpx aiofiles Pillow
 
 - https://github.com/chenyme/grok2api
 - https://github.com/Tomiya233/grok2api
+- https://github.com/XeanYu/grok2api-rs
 
 ---
 
@@ -168,6 +169,7 @@ A：请确保消息中包含图片、引用了带图消息，或使用 `@用户`
 - ✅ 新增 NSFW 命令与批量命令
 - ✅ 修复命令提示词空格/换行截断问题
 - ✅ 增强图片提取（当前消息、引用消息、@头像）
+
 
 
 
