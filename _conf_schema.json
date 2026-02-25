@@ -1,23 +1,17 @@
 {
-  "server_url": {
-    "description": "Grok2API服务地址",
+  "video_provider_id": {
+    "description": "视频生成模型提供商",
     "type": "string",
-    "hint": "例如：http://127.0.0.1:8000（自动补全后缀/v1/chat/completions）",
-    "default": "http://127.0.0.1:8000"
+    "_special": "select_provider"
   },
-  "model_id": {
-    "description": "视频生成模型ID",
+  "image_provider_id": {
+    "description": "常规图片生成模型提供商",
     "type": "string",
-    "default": "grok-imagine-0.9"
+    "_special": "select_provider"
   },
-  "image_model_id": {
-    "description": "图片生成模型ID",
+  "nsfw_provider_id": {
+    "description": "NSFW 图片生成模型提供商",
     "type": "string",
-    "default": "grok-4.1-thinking"
-  },
-  "api_key": {
-    "description": "Grok2API-Key",
-    "type": "string",
-    "default": ""
+    "_special": "select_provider"
   }
 }
