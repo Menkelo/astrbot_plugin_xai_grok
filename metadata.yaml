@@ -1,7 +1,7 @@
 name: astrbot_plugin_xai_grok
 display_name: Grok-Imagine
-desc: "基于Grok2API的文/图生图，图生视频插件，支持全局预设"
-version: 1.0.1
+desc: "基于Grok2API的文/图生图，文/图生视频插件，支持全局预设"
+version: 1.1.0
 author: Menkelo
 support_platforms: 
   - aiocqhttp
