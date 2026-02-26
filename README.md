@@ -170,8 +170,6 @@ pip install httpx aiofiles Pillow
 参考项目：
 
 - https://github.com/chenyme/grok2api
-- https://github.com/Tomiya233/grok2api
-- https://github.com/XeanYu/grok2api-rs
 
 ---
 
@@ -219,3 +217,4 @@ A：图生图当前固定按原图比例处理，提示词中的比例仅会被�
 2. 网络需稳定（生成后还需下载媒体文件）。  
 3. 默认不保留历史生成文件（自动清理）。  
 4. 请遵守所在平台与法律法规。
+
