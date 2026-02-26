@@ -1,17 +1,20 @@
 {
   "video_provider_id": {
-    "description": "视频生成模型提供商",
+    "description": "视频模型提供商",
     "type": "string",
-    "_special": "select_provider"
+    "_special": "select_provider",
+    "hint": "请选择可用于视频生成的提供商模型（如 grok-imagine-1.0-video）"
   },
-  "image_provider_id": {
-    "description": "常规图片生成模型提供商",
+  "image_gen_provider_id": {
+    "description": "文生图模型提供商",
     "type": "string",
-    "_special": "select_provider"
+    "_special": "select_provider",
+    "hint": "用于 /画图（无参考图）→ /v1/images/generations（如 grok-imagine-1.0）"
   },
-  "nsfw_provider_id": {
-    "description": "NSFW 图片生成模型提供商",
+  "image_edit_provider_id": {
+    "description": "图生图模型提供商",
     "type": "string",
-    "_special": "select_provider"
+    "_special": "select_provider",
+    "hint": "用于 /画图（带参考图）→ /v1/images/edits（如 grok-imagine-1.0-edit）"
   }
 }
