@@ -97,63 +97,70 @@ class PresetService:
 
     @staticmethod
     def _remove_at_tokens(text: str) -> str:
+        """
+        移除 @ 提及（包括黏连、带空格、特殊昵称）：
+        - @xxx
+        - @ xxx
+        - @ ♡⑨
+        - [CQ:at,qq=...]
+        - [at:...]
+        - <at ...>
+        """
         s = str(text or "")
 
-        # CQ at
+        # CQ / OneBot / XML 风格
         s = re.sub(r"\[CQ:at,[^\]]+\]", " ", s, flags=re.I)
-
-        # OneBot 可能变体
         s = re.sub(r"\[at:[^\]]+\]", " ", s, flags=re.I)
-
-        # HTML/XML at
         s = re.sub(r"<at[^>]*>", " ", s, flags=re.I)
 
-        # 关键：无论是否有空格，直接去掉 @后连续非空白
-        # 例：娘化@晗子 / @晗子 / @123456
-        s = re.sub(r"@[^\s,，;；]+", " ", s)
+        # @提及（半角/全角），允许@后有空格，然后跟一个非空白token
+        # 能覆盖：@晗子 / @ 晗子 / @ ♡⑨ / 娘化@晗子
+        s = re.sub(r"[@＠]\s*[^\s,，;；]+", " ", s)
 
-        # @全体
-        s = re.sub(r"@(全体成员|all)\b", " ", s, flags=re.I)
+        # 单独残留的 @
+        s = re.sub(r"[@＠]", " ", s)
 
         return re.sub(r"\s+", " ", s).strip()
 
     @classmethod
     def _strip_nonsemantic_tokens_for_flag(cls, text: str) -> str:
+        """
+        用于判断 has_extra：
+        - 去掉 @提及
+        - 去掉比例 / 尺寸
+        - 去掉标点
+        """
         s = cls._remove_at_tokens(text)
 
-        # 比例 1:1 / 16:9
+        # 比例：1:1 / 16:9
         s = re.sub(r"(?<!\d)\d{1,2}\s*[:：]\s*\d{1,2}(?!\d)", " ", s)
 
-        # 尺寸 1024x1792 / 1024×1792
+        # 尺寸：1024x1792 / 1024×1792
         s = re.sub(r"(?<!\d)\d{2,5}\s*[xX×]\s*\d{2,5}(?!\d)", " ", s)
 
-        # 清标点
+        # 标点与分隔
         s = re.sub(r"[，,。.!！?？;；:：|/\\\-\_\(\)\[\]\{\}\"'`~]+", " ", s)
 
         return re.sub(r"\s+", " ", s).strip()
 
     @classmethod
     def _clean_extra_for_prompt(cls, text: str) -> str:
-        # 真正给模型的 extra：去掉 @，保留正常语义
+        """
+        真正拼接到模型提示词的 extra：
+        - 去掉 @提及
+        """
         s = cls._remove_at_tokens(text)
         return re.sub(r"\s+", " ", s).strip()
 
     @staticmethod
     def _match_key(prompt: str, key: str) -> bool:
-        """
-        支持这些形式：
-        - 娘化
-        - 娘化 xxx
-        - 娘化@晗子
-        - 娘化,xxx / 娘化，xxx
-        """
         p = (prompt or "").strip().lower()
         k = (key or "").strip().lower()
         if not p or not k:
             return False
         if p == k:
             return True
-        return bool(re.match(rf"^{re.escape(k)}(?:\s+|[@,，]|$)", p))
+        return bool(re.match(rf"^{re.escape(k)}(?:\s+|[@＠,，]|$)", p))
 
     async def apply(self, prompt: str, event) -> Tuple[str, Optional[str], bool]:
         """
