@@ -478,10 +478,10 @@ class TaskService:
                     f"resolution={video_resolution or 'default'}, "
                     f"duration_requested={video_duration_seconds or 'default'}, "
                     f"duration_backend={backend_duration_seconds or 'default'}, "
-                    f"api=chat/completions"
+                    f"api={'videos(multipart)' if is_i2v_only_video_model and image_base64 else 'chat/completions'}"
                 )
 
-                resp, error = await self.api_client.call_chat(
+                resp, error = await self.api_client.call_video(
                     prompt=video_prompt,
                     image_base64=image_base64,
                     model=runtime.model,

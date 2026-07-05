@@ -1,3 +1,13 @@
+# [v1.1.7] - 兼容 grok-imagine-video-1.5-preview 图生视频接口
+
+* **视频生成**
+  * `grok-imagine-video-1.5-preview` 携带参考图时改走 `POST /v1/videos` multipart 表单
+  * 按后端要求传递 `input_reference` 图片字段
+  * 时长改用 `seconds` 字段，支持将提示词中的 `1-15s` 传给后端
+  * 尺寸继续使用 `size` 字段，例如 `720x1280`
+
+---
+
 # [v1.1.6] - 视频接口回退到 chat/completions
 
 * **🎬 视频生成**
