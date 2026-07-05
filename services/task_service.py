@@ -10,8 +10,9 @@ from astrbot.api.message_components import Video, Image as AstrImage, Reply
 
 class TaskService:
     ALLOWED_SIZES = {"1024x1024", "1024x1792", "1280x720", "1792x1024", "720x1280"}
-    SUPPORTED_VIDEO_DURATIONS = {6, 10, 12, 15, 16, 20}
-    VIDEO_DURATION_BACKEND_MAP = {15: 16}
+    LEGACY_VIDEO_DURATIONS = {6, 10, 12, 16, 20}
+    XAI_VIDEO_15_MIN_DURATION = 1
+    XAI_VIDEO_15_MAX_DURATION = 15
     VIDEO_RATIO_SIZE_MAP = {
         "1:1": "1024x1024",
         "16:9": "1280x720",
@@ -49,6 +50,11 @@ class TaskService:
     def _is_grok_41(model: str) -> bool:
         m = str(model or "").strip().lower()
         return "grok-4.1" in m or "grok41" in m
+
+    @staticmethod
+    def _is_xai_video_15(model: str) -> bool:
+        m = str(model or "").strip().lower()
+        return "grok-imagine-video-1.5" in m
 
     @staticmethod
     def _is_tool_usage_card_response(resp: dict) -> bool:
@@ -136,7 +142,7 @@ class TaskService:
         return s
 
     @staticmethod
-    def _extract_aspect_ratio_for_video(prompt: str) -> Tuple[str, Optional[str]]:
+    def _extract_aspect_ratio_for_video(prompt: str, strip_token: bool = True) -> Tuple[str, Optional[str]]:
         text = str(prompt or "")
         aspect_ratio = None
 
@@ -146,7 +152,8 @@ class TaskService:
             allowed = {"1:1", "2:3", "3:2", "16:9", "9:16", "4:3", "3:4"}
             if ratio in allowed:
                 aspect_ratio = ratio
-                text = text[:m.start()] + " " + text[m.end():]
+                if strip_token:
+                    text = text[:m.start()] + " " + text[m.end():]
 
         if not aspect_ratio:
             alias_map = [
@@ -158,7 +165,8 @@ class TaskService:
                 mm = re.search(p, text, flags=re.I)
                 if mm:
                     aspect_ratio = ar
-                    text = re.sub(p, " ", text, flags=re.I, count=1)
+                    if strip_token:
+                        text = re.sub(p, " ", text, flags=re.I, count=1)
                     break
 
         text = re.sub(r"\s+", " ", text).strip()
@@ -182,18 +190,35 @@ class TaskService:
         )
         if m:
             candidate = int(m.group(1))
-            if candidate in cls.SUPPORTED_VIDEO_DURATIONS:
-                duration_seconds = candidate
-                text = text[:m.start()] + " " + text[m.end():]
+            duration_seconds = candidate
+            text = text[:m.start()] + " " + text[m.end():]
 
         text = re.sub(r"\s+", " ", text).strip()
         return text, duration_seconds
 
     @classmethod
-    def _backend_duration_for_video(cls, duration_seconds: Optional[int]) -> Optional[int]:
+    def _backend_duration_for_video(
+        cls,
+        duration_seconds: Optional[int],
+        model: str
+    ) -> Tuple[Optional[int], Optional[str]]:
         if not duration_seconds:
-            return None
-        return cls.VIDEO_DURATION_BACKEND_MAP.get(duration_seconds, duration_seconds)
+            return None, None
+
+        if cls._is_xai_video_15(model):
+            if cls.XAI_VIDEO_15_MIN_DURATION <= duration_seconds <= cls.XAI_VIDEO_15_MAX_DURATION:
+                return duration_seconds, None
+            return None, (
+                "grok-imagine-video-1.5 系列仅支持 1-15 秒视频时长，"
+                f"当前输入: {duration_seconds}s"
+            )
+
+        if duration_seconds == 15:
+            return 16, None
+        if duration_seconds in cls.LEGACY_VIDEO_DURATIONS:
+            return duration_seconds, None
+        allowed = "6 / 10 / 12 / 16 / 20"
+        return None, f"当前视频后端仅支持 {allowed} 秒；15s 会自动按 16s 兼容"
 
     async def _download_with_retry(self, url: str, base_url: str, api_key: str) -> Tuple[Optional[str], Optional[str]]:
         last_err = None
@@ -353,36 +378,61 @@ class TaskService:
                 video_duration_seconds = None
                 backend_duration_seconds = None
                 video_size = None
+                is_xai_video_15 = self._is_xai_video_15(runtime.model)
 
                 video_prompt, video_duration_seconds = self._extract_duration_for_video(video_prompt)
-                backend_duration_seconds = self._backend_duration_for_video(video_duration_seconds)
-                video_prompt, video_aspect_ratio = self._extract_aspect_ratio_for_video(video_prompt)
-                video_size = self._video_size_for_aspect_ratio(video_aspect_ratio)
+                backend_duration_seconds, duration_error = self._backend_duration_for_video(
+                    video_duration_seconds,
+                    runtime.model
+                )
+                if duration_error:
+                    await self.send_service.reply_error(event, f"❌ {duration_error}")
+                    return
+
+                video_prompt, video_aspect_ratio = self._extract_aspect_ratio_for_video(
+                    video_prompt,
+                    strip_token=(not is_xai_video_15)
+                )
+                if not is_xai_video_15:
+                    video_size = self._video_size_for_aspect_ratio(video_aspect_ratio)
 
                 logger.info(
                     f"[task.video] input_prompt={prompt!r}, parsed_prompt={video_prompt!r}, "
                     f"aspect_ratio={video_aspect_ratio or 'default'}, video_size={video_size or 'default'}, "
                     f"duration_requested={video_duration_seconds or 'default'}, "
-                    f"duration_backend={backend_duration_seconds or 'default'}"
+                    f"duration_backend={backend_duration_seconds or 'default'}, "
+                    f"xai_video_15={is_xai_video_15}"
                 )
                 logger.info(
                     f"任务路由: task_type=video, model={runtime.model}, "
                     f"mode={'i2v' if image_base64 else 't2v'}, "
                     f"aspect_ratio={video_aspect_ratio or 'default'}, video_size={video_size or 'default'}, "
                     f"duration_requested={video_duration_seconds or 'default'}, "
-                    f"duration_backend={backend_duration_seconds or 'default'}"
+                    f"duration_backend={backend_duration_seconds or 'default'}, "
+                    f"api={'videos/generations' if is_xai_video_15 else 'chat/completions'}"
                 )
 
-                resp, error = await self.api_client.call_chat(
-                    prompt=video_prompt,
-                    image_base64=image_base64,
-                    model=runtime.model,
-                    base_url=runtime.base_url,
-                    api_key=runtime.api_key,
-                    aspect_ratio=video_aspect_ratio,
-                    duration_seconds=backend_duration_seconds,
-                    video_size=video_size
-                )
+                if is_xai_video_15:
+                    resp, error = await self.api_client.call_video_generation(
+                        prompt=video_prompt,
+                        image_base64=image_base64,
+                        model=runtime.model,
+                        base_url=runtime.base_url,
+                        api_key=runtime.api_key,
+                        duration_seconds=backend_duration_seconds,
+                        aspect_ratio=video_aspect_ratio
+                    )
+                else:
+                    resp, error = await self.api_client.call_chat(
+                        prompt=video_prompt,
+                        image_base64=image_base64,
+                        model=runtime.model,
+                        base_url=runtime.base_url,
+                        api_key=runtime.api_key,
+                        aspect_ratio=video_aspect_ratio,
+                        duration_seconds=backend_duration_seconds,
+                        video_size=video_size
+                    )
                 if error:
                     await self.send_service.reply_error(event, f"❌ {error}")
                     return

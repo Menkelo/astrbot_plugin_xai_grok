@@ -1,3 +1,12 @@
+# [v1.1.4] - 兼容 grok-imagine-video-1.5
+
+* **🎬 视频生成**
+  * `grok-imagine-video-1.5*` / `grok-imagine-video-1.5-preview` 改走 xAI `POST /v1/videos/generations`
+  * 支持官方 `duration` 参数范围 `1-15` 秒，`15s` 不再映射为 `16s`
+  * 图生视频通过 `image.url` 传参考图，并轮询 `/v1/videos/{request_id}` 获取成片
+
+---
+
 # [v1.1.3] - 修复视频比例与时长透传
 
 * **🎬 视频生成**

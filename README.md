@@ -1,6 +1,6 @@
 # Grok 图片/视频生成插件（Provider 版）
 
-> 基于 [Grok2API](https://github.com/chenyme/grok2api) 的多媒体插件。  
+> 兼容 xAI Imagine API 与 [Grok2API](https://github.com/chenyme/grok2api) 的多媒体插件。  
 > 支持文生图、图生图、文生视频、图生视频，自动下载并发送结果。
 
 ---
@@ -46,8 +46,8 @@
 - 有参考图：走图生视频
 - 无参考图：走文生视频
 - 视频可在提示词中写比例，例如 `1:1`、`16:9`、`9:16`（文生视频 / 图生视频都支持）
-- 视频可在提示词中写 `15s`、`15秒` 或 `15秒钟` 指定 15 秒目标时长
-- 由于 Grok2API 当前视频时长只支持 `6/10/12/16/20`，`15s` 会按最接近的 `16s` 透传
+- 使用 `grok-imagine-video-1.5*` / `grok-imagine-video-1.5-preview` 时，时长支持 `1-15s`，例如 `15s` 会精确透传为 `duration=15`
+- 使用旧 Grok2API 视频链路时，时长支持 `6/10/12/16/20`；`15s` 会按最接近的 `16s` 兼容
 
 示例：
 
@@ -188,9 +188,12 @@
 ## 技术实现摘要
 
 - Chat 接口：`/v1/chat/completions`
-  - 用于视频生成（文生/图生，支持比例到 `video_config.size` 的映射与时长透传）
+  - 用于旧视频生成链路（文生/图生，支持比例到 `video_config.size` 的映射与时长透传）
   - 用于文生图（当模型是 `grok-4.1*`）
   - 用于图生图（当模型是 `grok-4.1*`）
+- Video Generation 接口：`/v1/videos/generations`
+  - 用于 `grok-imagine-video-1.5*` / `grok-imagine-video-1.5-preview`
+  - 支持 `duration` 1-15 秒，图生视频通过 `image.url` 传参考图
 - Image Generation 接口：`/v1/images/generations`
   - 用于文生图（当模型是 `grok-imagine*`）
 - Image Edit 接口：`/v1/images/edits`
@@ -217,8 +220,8 @@ A：请在 provider 中补全密钥字段（`key/api_key/token`）。
 A：已修复。当前版本支持空格与换行后的完整内容，并兼容比例紧贴写法（如 `1:1`）。
 
 ### Q4：视频比例不生效怎么办？
-A：先看日志是否出现 `video_size=1024x1024`、`1280x720` 或 `720x1280`。  
-Grok2API 视频链路实际读取的是 `video_config.size`，插件会从提示词比例自动映射。
+A：旧 Grok2API 视频链路看日志是否出现 `video_size=1024x1024`、`1280x720` 或 `720x1280`。  
+`grok-imagine-video-1.5*` 官方接口未公开比例参数，插件会保留提示词中的 `16:9 / 9:16 / 1:1` 让模型按文本理解。
 
 ### Q5：图生图为什么不按 `1:1` 生成？
 A：图生图链路会清理比例/尺寸标记，不将其作为强制改尺寸参数使用；最终表现取决于模型与后端实现。
