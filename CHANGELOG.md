@@ -1,3 +1,12 @@
+# [v1.1.6] - 视频接口回退到 chat/completions
+
+* **🎬 视频生成**
+  * 不再调用 `/v1/videos/generations`
+  * 所有视频模型统一走 `/v1/chat/completions`
+  * 继续透传 `duration / aspect_ratio / video_config.size / video_config.resolution`
+
+---
+
 # [v1.1.5] - 拆分文生视频与图生视频槽位
 
 * **🎬 视频配置**
