@@ -49,6 +49,7 @@
 - 视频也支持直接写尺寸：`1024x1024`、`1024x1792`、`1280x720`、`1792x1024`、`720x1280`
 - 插件通过 `chat/completions` 透传 `aspect_ratio` 与 `video_config.size`
 - 可写 `480p`、`720p`、`1080p` 透传 `video_config.resolution`
+- 图生视频指定与原图不同的比例时，参考图会先做等比画布适配，避免被后端拉伸
 - 使用 `grok-imagine-video-1.5*` / `grok-imagine-video-1.5-preview` 时，插件会按 `1-15s` 校验并透传时长；最终是否生效取决于后端的 `chat/completions` 视频链路
 - `grok-imagine-video-1.5-preview` 仅用于图生视频；无参考图时请配置文生视频槽位为 `grok-imagine-video` 或当前后端支持的 chat 视频模型
 - 当前兼容策略不调用 `/v1/videos`；`grok-imagine-video` 也走 `/v1/chat/completions`

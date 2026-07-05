@@ -2,6 +2,7 @@ import asyncio
 import base64
 import io
 import re
+from functools import partial
 from typing import Any, List, Optional, Tuple
 
 import httpx
@@ -11,8 +12,10 @@ from astrbot.api.message_components import Image as AstrImage, At, Reply
 
 try:
     from PIL import Image as PILImage
+    from PIL import ImageFilter
 except ImportError:
     PILImage = None
+    ImageFilter = None
 
 
 class ImageService:
@@ -28,7 +31,51 @@ class ImageService:
             return f"data:image/jpeg;base64,{base64_str}"
         return base64_str
 
-    def _process_image_sync(self, base64_str: str, crop_for_video=False) -> str:
+    @staticmethod
+    def _fit_image_to_aspect(img, target_ratio: float):
+        width, height = img.size
+        if width <= 0 or height <= 0 or target_ratio <= 0:
+            return img
+
+        ratio = width / height
+        if abs(ratio - target_ratio) < 0.01:
+            return img
+
+        if target_ratio >= ratio:
+            canvas_h = height
+            canvas_w = max(width, int(round(canvas_h * target_ratio)))
+        else:
+            canvas_w = width
+            canvas_h = max(height, int(round(canvas_w / target_ratio)))
+
+        bg = img.copy()
+        bg_ratio = width / height
+        if bg_ratio > target_ratio:
+            bg_h = canvas_h
+            bg_w = int(round(bg_h * bg_ratio))
+        else:
+            bg_w = canvas_w
+            bg_h = int(round(bg_w / bg_ratio))
+        bg = bg.resize((bg_w, bg_h), PILImage.Resampling.LANCZOS)
+        left = max(0, (bg_w - canvas_w) // 2)
+        top = max(0, (bg_h - canvas_h) // 2)
+        bg = bg.crop((left, top, left + canvas_w, top + canvas_h))
+        if ImageFilter:
+            bg = bg.filter(ImageFilter.GaussianBlur(radius=18))
+
+        fg = img.copy()
+        fg.thumbnail((canvas_w, canvas_h), PILImage.Resampling.LANCZOS)
+        x = (canvas_w - fg.width) // 2
+        y = (canvas_h - fg.height) // 2
+        bg.paste(fg, (x, y))
+        return bg
+
+    def _process_image_sync(
+        self,
+        base64_str: str,
+        crop_for_video=False,
+        target_aspect_ratio: Optional[float] = None
+    ) -> str:
         if not PILImage:
             return self._format_base64(base64_str)
 
@@ -55,7 +102,14 @@ class ImageService:
                 if img.mode != "RGB":
                     img = img.convert("RGB")
 
-                if crop_for_video:
+                if crop_for_video and target_aspect_ratio:
+                    img = self._fit_image_to_aspect(img, target_aspect_ratio)
+                    logger.info(
+                        f"[video.image] fit reference image to target_ratio={target_aspect_ratio:.4f}, "
+                        f"output_size={img.size[0]}x{img.size[1]}"
+                    )
+
+                elif crop_for_video:
                     width, height = img.size
                     ratio = width / height
                     if 0.85 <= ratio <= 1.15:
@@ -75,9 +129,10 @@ class ImageService:
                         img = img.crop((0, top, width, top + new_height))
 
                 save_kwargs = {"format": "JPEG"}
-                if is_too_large:
+                needs_resize = is_too_large or max(img.size) > 2048
+                if needs_resize:
                     img.thumbnail((2048, 2048), PILImage.Resampling.LANCZOS)
-                    save_kwargs["quality"] = 80
+                    save_kwargs["quality"] = 80 if is_too_large else 92
                 else:
                     save_kwargs["quality"] = 95
                     save_kwargs["subsampling"] = 0
@@ -152,7 +207,12 @@ class ImageService:
                 pass
         return False
 
-    async def _resolve_candidates(self, candidates: List[Tuple[str, Any]], crop_for_video: bool) -> List[str]:
+    async def _resolve_candidates(
+        self,
+        candidates: List[Tuple[str, Any]],
+        crop_for_video: bool,
+        target_aspect_ratio: Optional[float] = None
+    ) -> List[str]:
         if not candidates:
             return []
         loop = asyncio.get_running_loop()
@@ -167,7 +227,13 @@ class ImageService:
 
                 if not b64:
                     return None
-                return await loop.run_in_executor(None, self._process_image_sync, b64, crop_for_video)
+                fn = partial(
+                    self._process_image_sync,
+                    b64,
+                    crop_for_video,
+                    target_aspect_ratio
+                )
+                return await loop.run_in_executor(None, fn)
             except Exception:
                 return None
 
@@ -175,7 +241,11 @@ class ImageService:
         return [r for r in results if isinstance(r, str)]
 
     async def extract_images_from_message(
-        self, event: AstrMessageEvent, crop_for_video=False, target_index=-1
+        self,
+        event: AstrMessageEvent,
+        crop_for_video=False,
+        target_index=-1,
+        target_aspect_ratio: Optional[float] = None
     ) -> List[str]:
         if not hasattr(event, "message_obj") or not event.message_obj:
             return []
@@ -198,10 +268,10 @@ class ImageService:
 
         found = self._collect_candidates_from_chain(event.message_obj.message, add_candidate, allow_at=True)
         if found:
-            return await self._resolve_candidates(candidates, crop_for_video)
+            return await self._resolve_candidates(candidates, crop_for_video, target_aspect_ratio)
 
         if candidates and target_index == -1:
-            return await self._resolve_candidates(candidates, crop_for_video)
+            return await self._resolve_candidates(candidates, crop_for_video, target_aspect_ratio)
 
         await self._collect_candidates_from_reply(event, add_candidate)
-        return await self._resolve_candidates(candidates, crop_for_video)
+        return await self._resolve_candidates(candidates, crop_for_video, target_aspect_ratio)

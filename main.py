@@ -88,8 +88,28 @@ class GrokMediaPlugin(Star):
             yield event.plain_result("❌ 请输入视频提示词，例如：/视频 一只猫在跑步 1:1")
             return
 
+        target_aspect_ratio = None
+        _, video_aspect_ratio, video_size = self.task_service._extract_video_shape(
+            prompt,
+            strip_token=False
+        )
+        if video_aspect_ratio and ":" in video_aspect_ratio:
+            try:
+                w, h = video_aspect_ratio.split(":", 1)
+                target_aspect_ratio = float(w) / float(h)
+            except Exception:
+                target_aspect_ratio = None
+        if target_aspect_ratio:
+            logger.info(
+                f"[瑙嗛] target_aspect_ratio={video_aspect_ratio}, "
+                f"video_size={video_size or 'default'}"
+            )
+
         images = await self.image_service.extract_images_from_message(
-            event, crop_for_video=True, target_index=0
+            event,
+            crop_for_video=True,
+            target_index=0,
+            target_aspect_ratio=target_aspect_ratio
         )
         image_base64 = images[0] if images else None
 
