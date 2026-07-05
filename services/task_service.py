@@ -79,6 +79,11 @@ class TaskService:
         return "grok-imagine-video-1.5-preview" in m
 
     @staticmethod
+    def _is_plain_grok_imagine_video(model: str) -> bool:
+        m = str(model or "").strip().lower()
+        return m in {"grok-imagine-video", "grok-imagine-video-latest"}
+
+    @staticmethod
     def _is_tool_usage_card_response(resp: dict) -> bool:
         try:
             if not isinstance(resp, dict):
@@ -443,7 +448,15 @@ class TaskService:
                 if is_i2v_only_video_model and not image_base64:
                     await self.send_service.reply_error(
                         event,
-                        "❌ 当前视频模型仅支持图生视频。请发送/引用图片，或在配置中为文生视频选择 grok-imagine-video。"
+                        "❌ 当前视频模型仅支持图生视频。请发送/引用图片，或在配置中为文生视频选择支持 chat/completions 的视频模型。"
+                    )
+                    return
+
+                if self._is_plain_grok_imagine_video(runtime.model):
+                    await self.send_service.reply_error(
+                        event,
+                        "❌ 当前后端的 chat/completions 链路不支持 grok-imagine-video，直接请求会返回 404。\n"
+                        "已按要求不再调用视频专用接口；请在文生视频/图生视频槽位中换成该后端支持的 chat 视频模型。"
                     )
                     return
 
@@ -478,7 +491,7 @@ class TaskService:
                     f"resolution={video_resolution or 'default'}, "
                     f"duration_requested={video_duration_seconds or 'default'}, "
                     f"duration_backend={backend_duration_seconds or 'default'}, "
-                    f"api={'videos(multipart)' if is_i2v_only_video_model and image_base64 else 'chat/completions'}"
+                    f"api=chat/completions"
                 )
 
                 resp, error = await self.api_client.call_video(

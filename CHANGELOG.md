@@ -1,3 +1,13 @@
+# [v1.1.8] - 禁用 /v1/videos 并拦截 grok-imagine-video 404
+
+* **视频生成**
+  * 不再调用 `/v1/videos`
+  * `grok-imagine-video` / `grok-imagine-video-latest` 不再发送到 `chat/completions`，避免后端返回模型 404
+  * 当配置了不兼容的视频模型时，提前返回可读的配置提示
+  * 视频生成链路继续只使用 `/v1/chat/completions`
+
+---
+
 # [v1.1.7] - 兼容 grok-imagine-video-1.5-preview 图生视频接口
 
 * **视频生成**

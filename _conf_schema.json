@@ -3,13 +3,13 @@
     "description": "默认视频模型提供商",
     "type": "string",
     "_special": "select_provider",
-    "hint": "作为文生视频/图生视频未单独配置时的回退模型（如 grok-imagine-video）"
+    "hint": "作为文生视频/图生视频未单独配置时的回退模型。请使用当前后端支持 chat/completions 的视频模型"
   },
   "video_t2v_provider_id": {
     "description": "文生视频模型提供商",
     "type": "string",
     "_special": "select_provider",
-    "hint": "无参考图时使用。建议选择支持文生视频的模型（如 grok-imagine-video）"
+    "hint": "无参考图时使用。请选择当前后端支持 chat/completions 的文生视频模型；grok-imagine-video 在该链路可能返回 404"
   },
   "video_i2v_provider_id": {
     "description": "图生视频模型提供商",

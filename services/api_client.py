@@ -156,100 +156,6 @@ class ApiClient:
 
         return None, last_error
 
-    async def call_video_multipart(
-        self,
-        prompt: str,
-        image_base64: str,
-        model: str,
-        base_url: str,
-        api_key: str,
-        size: Optional[str] = None,
-        seconds: Optional[int] = None
-    ) -> Tuple[Optional[dict], Optional[str]]:
-        url = self.endpoint(base_url, "videos")
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Accept": "application/json",
-            "User-Agent": "curl/8.7.1"
-        }
-        timeout = httpx.Timeout(connect=20.0, read=self.timeout_seconds, write=60.0, pool=self.timeout_seconds + 10)
-        last_error = "未知错误"
-
-        raw, mime = self._decode_data_url(image_base64)
-        if not raw:
-            return None, "参考图无效：无法解析为图片数据"
-
-        ext_map = {
-            "image/jpeg": "jpg",
-            "image/png": "png",
-            "image/gif": "gif",
-            "image/webp": "webp"
-        }
-        filename = f"reference.{ext_map.get(mime, 'png')}"
-
-        data = {
-            "model": model,
-            "prompt": prompt or ""
-        }
-        if size:
-            data["size"] = size
-        if seconds:
-            data["seconds"] = str(seconds)
-
-        files = {
-            "input_reference": (filename, raw, mime)
-        }
-
-        logger.info(
-            f"[api.video_multipart] endpoint=/v1/videos, model={model}, "
-            f"size={size or 'default'}, seconds={seconds or 'default'}, file_field=input_reference"
-        )
-
-        for i in range(self.max_retry_attempts):
-            try:
-                logger.info(
-                    f"调用 Video Multipart API (模型: {model}, size: {size or 'default'}, "
-                    f"seconds: {seconds or 'default'}, 尝试 {i + 1})"
-                )
-                r = await self.http_client.post(
-                    url,
-                    data=data,
-                    files=files,
-                    headers=headers,
-                    timeout=timeout
-                )
-
-                if r.status_code in (200, 201, 202):
-                    try:
-                        return r.json(), None
-                    except json.JSONDecodeError:
-                        last_error = "JSON解析失败"
-                        continue
-
-                if r.status_code == 429:
-                    last_error = "触发限流 (429)，正在重试..."
-                    await asyncio.sleep(2)
-                    continue
-
-                if r.status_code == 500:
-                    t = r.text
-                    if "void *" in t or "NoneType" in t:
-                        continue
-                    last_error = f"服务端错误(500): {t[:120]}"
-                    continue
-
-                try:
-                    err = r.json()
-                    emsg = err.get("error", {}).get("message") or err.get("error")
-                    last_error = f"API错误({r.status_code}): {emsg}"
-                except Exception:
-                    last_error = f"API请求失败({r.status_code}): {r.text[:120]}"
-
-            except Exception as e:
-                last_error = f"请求异常: {e}"
-
-        return None, last_error
-
     async def call_video(
         self,
         prompt: str,
@@ -262,19 +168,6 @@ class ApiClient:
         video_size: Optional[str] = None,
         resolution: Optional[str] = None
     ) -> Tuple[Optional[dict], Optional[str]]:
-        _ = aspect_ratio, resolution
-        model_name = str(model or "").strip().lower()
-        if image_base64 and "grok-imagine-video-1.5-preview" in model_name:
-            return await self.call_video_multipart(
-                prompt=prompt,
-                image_base64=image_base64,
-                model=model,
-                base_url=base_url,
-                api_key=api_key,
-                size=video_size,
-                seconds=duration_seconds
-            )
-
         return await self.call_chat(
             prompt=prompt,
             image_base64=image_base64,
