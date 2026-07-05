@@ -1,3 +1,12 @@
+# [v1.1.9] - 恢复 grok-imagine-video chat 路由
+
+* **视频生成**
+  * `grok-imagine-video` / `grok-imagine-video-latest` 恢复走 `/v1/chat/completions`
+  * 继续不调用 `/v1/videos`
+  * 保留 `grok-imagine-video-1.5-preview` 无参考图时的图生视频限制提示
+
+---
+
 # [v1.1.8] - 禁用 /v1/videos 并拦截 grok-imagine-video 404
 
 * **视频生成**

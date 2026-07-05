@@ -50,8 +50,8 @@
 - 插件通过 `chat/completions` 透传 `aspect_ratio` 与 `video_config.size`
 - 可写 `480p`、`720p`、`1080p` 透传 `video_config.resolution`
 - 使用 `grok-imagine-video-1.5*` / `grok-imagine-video-1.5-preview` 时，插件会按 `1-15s` 校验并透传时长；最终是否生效取决于后端的 `chat/completions` 视频链路
-- `grok-imagine-video-1.5-preview` 仅用于图生视频；无参考图时请配置文生视频槽位为当前后端支持的 chat 视频模型
-- 当前兼容策略不调用 `/v1/videos`；`grok-imagine-video` 若在 `chat/completions` 返回 404，请更换为后端支持的模型名
+- `grok-imagine-video-1.5-preview` 仅用于图生视频；无参考图时请配置文生视频槽位为 `grok-imagine-video` 或当前后端支持的 chat 视频模型
+- 当前兼容策略不调用 `/v1/videos`；`grok-imagine-video` 也走 `/v1/chat/completions`
 - 使用旧 Grok2API 视频链路时，时长支持 `6/10/12/16/20`；`15s` 会按最接近的 `16s` 兼容
 
 示例：

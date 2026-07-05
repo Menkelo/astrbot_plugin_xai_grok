@@ -9,7 +9,7 @@
     "description": "文生视频模型提供商",
     "type": "string",
     "_special": "select_provider",
-    "hint": "无参考图时使用。请选择当前后端支持 chat/completions 的文生视频模型；grok-imagine-video 在该链路可能返回 404"
+    "hint": "无参考图时使用。可选择当前后端支持 chat/completions 的文生视频模型（如 grok-imagine-video）"
   },
   "video_i2v_provider_id": {
     "description": "图生视频模型提供商",
