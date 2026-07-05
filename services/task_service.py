@@ -10,7 +10,17 @@ from astrbot.api.message_components import Video, Image as AstrImage, Reply
 
 class TaskService:
     ALLOWED_SIZES = {"1024x1024", "1024x1792", "1280x720", "1792x1024", "720x1280"}
-    SUPPORTED_VIDEO_DURATIONS = {15}
+    SUPPORTED_VIDEO_DURATIONS = {6, 10, 12, 15, 16, 20}
+    VIDEO_DURATION_BACKEND_MAP = {15: 16}
+    VIDEO_RATIO_SIZE_MAP = {
+        "1:1": "1024x1024",
+        "16:9": "1280x720",
+        "9:16": "720x1280",
+        "2:3": "1024x1792",
+        "3:2": "1792x1024",
+        "4:3": "1792x1024",
+        "3:4": "1024x1792",
+    }
 
     def __init__(self, plugin, provider_resolver, api_client, media_service, send_service):
         self.plugin = plugin
@@ -155,6 +165,12 @@ class TaskService:
         return text, aspect_ratio
 
     @classmethod
+    def _video_size_for_aspect_ratio(cls, aspect_ratio: Optional[str]) -> Optional[str]:
+        if not aspect_ratio:
+            return None
+        return cls.VIDEO_RATIO_SIZE_MAP.get(aspect_ratio)
+
+    @classmethod
     def _extract_duration_for_video(cls, prompt: str) -> Tuple[str, Optional[int]]:
         text = str(prompt or "")
         duration_seconds = None
@@ -172,6 +188,12 @@ class TaskService:
 
         text = re.sub(r"\s+", " ", text).strip()
         return text, duration_seconds
+
+    @classmethod
+    def _backend_duration_for_video(cls, duration_seconds: Optional[int]) -> Optional[int]:
+        if not duration_seconds:
+            return None
+        return cls.VIDEO_DURATION_BACKEND_MAP.get(duration_seconds, duration_seconds)
 
     async def _download_with_retry(self, url: str, base_url: str, api_key: str) -> Tuple[Optional[str], Optional[str]]:
         last_err = None
@@ -329,22 +351,26 @@ class TaskService:
                 video_prompt = prompt
                 video_aspect_ratio = None
                 video_duration_seconds = None
+                backend_duration_seconds = None
+                video_size = None
 
                 video_prompt, video_duration_seconds = self._extract_duration_for_video(video_prompt)
-
-                if not image_base64:
-                    video_prompt, video_aspect_ratio = self._extract_aspect_ratio_for_video(video_prompt)
+                backend_duration_seconds = self._backend_duration_for_video(video_duration_seconds)
+                video_prompt, video_aspect_ratio = self._extract_aspect_ratio_for_video(video_prompt)
+                video_size = self._video_size_for_aspect_ratio(video_aspect_ratio)
 
                 logger.info(
                     f"[task.video] input_prompt={prompt!r}, parsed_prompt={video_prompt!r}, "
-                    f"aspect_ratio={video_aspect_ratio or 'default'}, "
-                    f"duration={video_duration_seconds or 'default'}"
+                    f"aspect_ratio={video_aspect_ratio or 'default'}, video_size={video_size or 'default'}, "
+                    f"duration_requested={video_duration_seconds or 'default'}, "
+                    f"duration_backend={backend_duration_seconds or 'default'}"
                 )
                 logger.info(
                     f"任务路由: task_type=video, model={runtime.model}, "
                     f"mode={'i2v' if image_base64 else 't2v'}, "
-                    f"aspect_ratio={video_aspect_ratio or 'default'}, "
-                    f"duration={video_duration_seconds or 'default'}"
+                    f"aspect_ratio={video_aspect_ratio or 'default'}, video_size={video_size or 'default'}, "
+                    f"duration_requested={video_duration_seconds or 'default'}, "
+                    f"duration_backend={backend_duration_seconds or 'default'}"
                 )
 
                 resp, error = await self.api_client.call_chat(
@@ -354,7 +380,8 @@ class TaskService:
                     base_url=runtime.base_url,
                     api_key=runtime.api_key,
                     aspect_ratio=video_aspect_ratio,
-                    duration_seconds=video_duration_seconds
+                    duration_seconds=backend_duration_seconds,
+                    video_size=video_size
                 )
                 if error:
                     await self.send_service.reply_error(event, f"❌ {error}")

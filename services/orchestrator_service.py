@@ -8,6 +8,8 @@ from ..utils.text_utils import normalize_spaces
 
 
 class OrchestratorService:
+    VIDEO_DURATION_BACKEND_MAP = {15: 16}
+
     def __init__(self, plugin, preset_service, task_service):
         self.plugin = plugin
         self.preset_service = preset_service
@@ -41,7 +43,7 @@ class OrchestratorService:
         if not m:
             return None
         duration = int(m.group(1))
-        return duration if duration == 15 else None
+        return duration if duration in {6, 10, 12, 15, 16, 20} else None
 
     async def start_once(
         self,
@@ -90,11 +92,14 @@ class OrchestratorService:
             # 文生图显示比例标签
             if task_type == "image" and detected_ratio:
                 status_msg += f" [{detected_ratio}]"
-            # 文生视频显示比例标签（图生视频不显示）
-            if task_type == "video" and (not image_base64) and detected_ratio:
+            if task_type == "video" and detected_ratio:
                 status_msg += f" [{detected_ratio}]"
             if task_type == "video" and detected_duration:
-                status_msg += f" [{detected_duration}s]"
+                backend_duration = self.VIDEO_DURATION_BACKEND_MAP.get(detected_duration)
+                if backend_duration:
+                    status_msg += f" [{detected_duration}s->{backend_duration}s]"
+                else:
+                    status_msg += f" [{detected_duration}s]"
 
             status_msg += "..."
             yield event.plain_result(status_msg)

@@ -54,11 +54,12 @@ class ApiClient:
         base_url: str,
         api_key: str,
         aspect_ratio: Optional[str] = None,
-        duration_seconds: Optional[int] = None
+        duration_seconds: Optional[int] = None,
+        video_size: Optional[str] = None
     ) -> Tuple[Optional[dict], Optional[str]]:
         """
         用于视频等 chat/completions
-        文生视频支持 aspect_ratio / seconds
+        视频支持 aspect_ratio / size / seconds
         """
         url = self.endpoint(base_url, "chat/completions")
 
@@ -80,15 +81,28 @@ class ApiClient:
             "tool_choice": "none"
         }
 
-        # 兼容不同后端：比例保留顶层和 video_config 两种位置；时长使用 Grok2API 的 seconds 字段。
+        video_config = {}
+
+        # 兼容不同后端：Grok2API 视频链路实际读取 video_config.size/seconds；
+        # 其他 OpenAI 兼容后端可能读取 aspect_ratio 或 duration。
         if aspect_ratio:
             payload["aspect_ratio"] = aspect_ratio
-            payload.setdefault("video_config", {})["aspect_ratio"] = aspect_ratio
+            video_config["aspect_ratio"] = aspect_ratio
+        if video_size:
+            video_config["size"] = video_size
         if duration_seconds:
-            payload.setdefault("video_config", {})["seconds"] = duration_seconds
+            payload["duration"] = duration_seconds
+            payload["duration_seconds"] = duration_seconds
+            video_config["seconds"] = duration_seconds
+            video_config["duration"] = duration_seconds
+            video_config["duration_seconds"] = duration_seconds
+        if video_config:
+            payload["video_config"] = video_config
 
         logger.info(
-            f"[api.chat] aspect_ratio={aspect_ratio}, duration={duration_seconds or 'default'}, "
+            f"[api.chat] aspect_ratio={aspect_ratio or 'default'}, "
+            f"video_size={video_size or 'default'}, duration={duration_seconds or 'default'}, "
+            f"video_config={video_config or 'default'}, "
             f"payload_keys={list(payload.keys())}"
         )
 
@@ -100,6 +114,7 @@ class ApiClient:
             try:
                 logger.info(
                     f"调用 Chat API (模型: {model}, aspect_ratio: {aspect_ratio or 'default'}, "
+                    f"video_size: {video_size or 'default'}, "
                     f"duration: {duration_seconds or 'default'}, 尝试 {i + 1})"
                 )
                 r = await self.http_client.post(url, json=payload, headers=headers, timeout=timeout)
