@@ -201,8 +201,8 @@
   - 用于图生图（当模型是 `grok-4.1*`）
 - 视频生成接口：`/v1/chat/completions`
   - 用于视频生成（文生/图生）
-  - 透传 `duration / duration_seconds / video_config.seconds / video_config.duration`
-  - 透传 `aspect_ratio / video_config.aspect_ratio / video_config.size / video_config.resolution`
+  - 透传 `seconds / duration / duration_seconds / video_config.seconds / video_config.duration`
+  - 透传 `size / aspect_ratio / video_config.aspect_ratio / video_config.size / video_config.resolution`
 - Image Generation 接口：`/v1/images/generations`
   - 用于文生图（当模型是 `grok-imagine*`）
 - Image Edit 接口：`/v1/images/edits`

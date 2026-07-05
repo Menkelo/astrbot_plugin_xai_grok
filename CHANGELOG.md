@@ -1,3 +1,13 @@
+# [v1.1.10] - 修复视频 chat 链路时长与尺寸透传
+
+* **视频生成**
+  * `/v1/chat/completions` 视频请求新增顶层 `seconds` 字段
+  * `/v1/chat/completions` 视频请求新增顶层 `size` 字段
+  * 保留 `video_config.seconds` / `video_config.size`，兼容不同后端读取方式
+  * 用于修复 `grok-imagine-video-1.5-preview` 默认 6s、比例不生效的问题
+
+---
+
 # [v1.1.9] - 恢复 grok-imagine-video chat 路由
 
 * **视频生成**

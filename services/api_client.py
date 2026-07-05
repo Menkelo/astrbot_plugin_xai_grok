@@ -90,11 +90,14 @@ class ApiClient:
             payload["aspect_ratio"] = aspect_ratio
             video_config["aspect_ratio"] = aspect_ratio
         if video_size:
+            payload["size"] = video_size
             video_config["size"] = video_size
         if resolution:
+            payload["resolution"] = resolution
             video_config["resolution"] = resolution
             video_config["resolution_name"] = resolution
         if duration_seconds:
+            payload["seconds"] = duration_seconds
             payload["duration"] = duration_seconds
             payload["duration_seconds"] = duration_seconds
             video_config["seconds"] = duration_seconds
