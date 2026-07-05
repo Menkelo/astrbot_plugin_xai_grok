@@ -10,6 +10,7 @@ from astrbot.api.message_components import Video, Image as AstrImage, Reply
 
 class TaskService:
     ALLOWED_SIZES = {"1024x1024", "1024x1792", "1280x720", "1792x1024", "720x1280"}
+    SUPPORTED_VIDEO_DURATIONS = {15}
 
     def __init__(self, plugin, provider_resolver, api_client, media_service, send_service):
         self.plugin = plugin
@@ -33,6 +34,11 @@ class TaskService:
         if task_type == "edit":
             return self.plugin.image_edit_provider_id
         return self.plugin.image_gen_provider_id
+
+    @staticmethod
+    def _is_grok_41(model: str) -> bool:
+        m = str(model or "").strip().lower()
+        return "grok-4.1" in m or "grok41" in m
 
     @staticmethod
     def _is_tool_usage_card_response(resp: dict) -> bool:
@@ -148,6 +154,25 @@ class TaskService:
         text = re.sub(r"\s+", " ", text).strip()
         return text, aspect_ratio
 
+    @classmethod
+    def _extract_duration_for_video(cls, prompt: str) -> Tuple[str, Optional[int]]:
+        text = str(prompt or "")
+        duration_seconds = None
+
+        m = re.search(
+            r"(?<!\d)(\d{1,3})\s*(?:seconds?|secs?|s|秒(?:钟)?)(?![a-zA-Z0-9])",
+            text,
+            flags=re.I
+        )
+        if m:
+            candidate = int(m.group(1))
+            if candidate in cls.SUPPORTED_VIDEO_DURATIONS:
+                duration_seconds = candidate
+                text = text[:m.start()] + " " + text[m.end():]
+
+        text = re.sub(r"\s+", " ", text).strip()
+        return text, duration_seconds
+
     async def _download_with_retry(self, url: str, base_url: str, api_key: str) -> Tuple[Optional[str], Optional[str]]:
         last_err = None
         for i in range(self.download_retry_attempts):
@@ -190,64 +215,136 @@ class TaskService:
             perr = None
 
             if task_type == "image":
-                prompt_clean, gen_size, invalid_size = self._extract_size_for_image(prompt)
+                # 文生图按模型路由
+                if self._is_grok_41(runtime.model):
+                    logger.info(f"任务路由: task_type=image, api=chat/completions, model={runtime.model}")
 
-                if invalid_size:
-                    await self.send_service.reply_error(event, self._unsupported_size_message(invalid_size))
-                    return
+                    resp, error = await self.api_client.call_chat(
+                        prompt=prompt,
+                        image_base64=None,
+                        model=runtime.model,
+                        base_url=runtime.base_url,
+                        api_key=runtime.api_key,
+                        aspect_ratio=None
+                    )
+                    if error:
+                        await self.send_service.reply_error(event, f"❌ {error}")
+                        return
 
-                if not gen_size:
-                    gen_size = "1024x1792"
+                    if self._is_tool_usage_card_response(resp):
+                        await self.send_service.reply_error(
+                            event,
+                            "❌ 当前模型返回了工具调用卡片（未实际生成媒体）。\n请更换生图模型提供商。"
+                        )
+                        return
 
-                logger.info(f"任务路由: task_type=image, model={runtime.model}, size={gen_size}")
+                    urls, perr = self.media_service.extract_media_url_from_chat_response(resp)
 
-                resp, error = await self.api_client.call_generation(
-                    prompt=prompt_clean,
-                    model=runtime.model,
-                    base_url=runtime.base_url,
-                    api_key=runtime.api_key,
-                    size=gen_size
-                )
-                if error:
-                    await self.send_service.reply_error(event, f"❌ {error}")
-                    return
-                urls, perr = self.media_service.extract_media_url_from_generation_response(resp)
+                else:
+                    # 默认走 generation（grok-imagine 系列）
+                    prompt_clean, gen_size, invalid_size = self._extract_size_for_image(prompt)
+
+                    if invalid_size:
+                        await self.send_service.reply_error(event, self._unsupported_size_message(invalid_size))
+                        return
+
+                    if not gen_size:
+                        gen_size = "1024x1792"
+
+                    logger.info(
+                        f"任务路由: task_type=image, api=images/generations, "
+                        f"model={runtime.model}, size={gen_size}"
+                    )
+
+                    resp, error = await self.api_client.call_generation(
+                        prompt=prompt_clean,
+                        model=runtime.model,
+                        base_url=runtime.base_url,
+                        api_key=runtime.api_key,
+                        size=gen_size
+                    )
+                    if error:
+                        await self.send_service.reply_error(event, f"❌ {error}")
+                        return
+
+                    urls, perr = self.media_service.extract_media_url_from_generation_response(resp)
 
             elif task_type == "edit":
                 if not image_base64:
                     await self.send_service.reply_error(event, "❌ 图生图需要提供参考图片")
                     return
 
-                # 图生图不改比例
+                # 图生图统一去掉比例/尺寸词，不改原图比例
                 edit_prompt_clean = self._strip_ratio_or_size_tokens(prompt)
-                logger.info(f"任务路由: task_type=edit, model={runtime.model}, size=follow-source")
 
-                resp, error = await self.api_client.call_image_edit(
-                    prompt=edit_prompt_clean,
-                    image_base64=image_base64,
-                    model=runtime.model,
-                    base_url=runtime.base_url,
-                    api_key=runtime.api_key
-                )
-                if error:
-                    await self.send_service.reply_error(event, f"❌ {error}")
-                    return
-                urls, perr = self.media_service.extract_media_url_from_generation_response(resp)
+                if self._is_grok_41(runtime.model):
+                    # grok-4.1 图生图走 chat/completions（携带参考图）
+                    logger.info(
+                        f"任务路由: task_type=edit, api=chat/completions, "
+                        f"model={runtime.model}, mode=i2i(chat)"
+                    )
+
+                    resp, error = await self.api_client.call_chat(
+                        prompt=edit_prompt_clean,
+                        image_base64=image_base64,
+                        model=runtime.model,
+                        base_url=runtime.base_url,
+                        api_key=runtime.api_key,
+                        aspect_ratio=None
+                    )
+                    if error:
+                        await self.send_service.reply_error(event, f"❌ {error}")
+                        return
+
+                    if self._is_tool_usage_card_response(resp):
+                        await self.send_service.reply_error(
+                            event,
+                            "❌ 当前模型返回了工具调用卡片（未实际生成媒体）。\n请更换图生图模型提供商。"
+                        )
+                        return
+
+                    urls, perr = self.media_service.extract_media_url_from_chat_response(resp)
+
+                else:
+                    # grok-imagine 图生图走 images/edits
+                    logger.info(
+                        f"任务路由: task_type=edit, api=images/edits, "
+                        f"model={runtime.model}, size=follow-source"
+                    )
+
+                    resp, error = await self.api_client.call_image_edit(
+                        prompt=edit_prompt_clean,
+                        image_base64=image_base64,
+                        model=runtime.model,
+                        base_url=runtime.base_url,
+                        api_key=runtime.api_key
+                    )
+                    if error:
+                        await self.send_service.reply_error(event, f"❌ {error}")
+                        return
+
+                    urls, perr = self.media_service.extract_media_url_from_generation_response(resp)
 
             elif task_type == "video":
                 video_prompt = prompt
                 video_aspect_ratio = None
+                video_duration_seconds = None
+
+                video_prompt, video_duration_seconds = self._extract_duration_for_video(video_prompt)
 
                 if not image_base64:
-                    video_prompt, video_aspect_ratio = self._extract_aspect_ratio_for_video(prompt)
+                    video_prompt, video_aspect_ratio = self._extract_aspect_ratio_for_video(video_prompt)
 
                 logger.info(
                     f"[task.video] input_prompt={prompt!r}, parsed_prompt={video_prompt!r}, "
-                    f"aspect_ratio={video_aspect_ratio or 'default'}"
+                    f"aspect_ratio={video_aspect_ratio or 'default'}, "
+                    f"duration={video_duration_seconds or 'default'}"
                 )
                 logger.info(
                     f"任务路由: task_type=video, model={runtime.model}, "
-                    f"mode={'i2v' if image_base64 else 't2v'}, aspect_ratio={video_aspect_ratio or 'default'}"
+                    f"mode={'i2v' if image_base64 else 't2v'}, "
+                    f"aspect_ratio={video_aspect_ratio or 'default'}, "
+                    f"duration={video_duration_seconds or 'default'}"
                 )
 
                 resp, error = await self.api_client.call_chat(
@@ -256,7 +353,8 @@ class TaskService:
                     model=runtime.model,
                     base_url=runtime.base_url,
                     api_key=runtime.api_key,
-                    aspect_ratio=video_aspect_ratio
+                    aspect_ratio=video_aspect_ratio,
+                    duration_seconds=video_duration_seconds
                 )
                 if error:
                     await self.send_service.reply_error(event, f"❌ {error}")

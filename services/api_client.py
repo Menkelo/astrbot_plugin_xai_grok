@@ -53,11 +53,12 @@ class ApiClient:
         model: str,
         base_url: str,
         api_key: str,
-        aspect_ratio: Optional[str] = None
+        aspect_ratio: Optional[str] = None,
+        duration_seconds: Optional[int] = None
     ) -> Tuple[Optional[dict], Optional[str]]:
         """
         用于视频等 chat/completions
-        文生视频支持 aspect_ratio
+        文生视频支持 aspect_ratio / seconds
         """
         url = self.endpoint(base_url, "chat/completions")
 
@@ -79,12 +80,17 @@ class ApiClient:
             "tool_choice": "none"
         }
 
-        # 兼容不同后端：两种位置都传
+        # 兼容不同后端：比例保留顶层和 video_config 两种位置；时长使用 Grok2API 的 seconds 字段。
         if aspect_ratio:
             payload["aspect_ratio"] = aspect_ratio
-            payload["video_config"] = {"aspect_ratio": aspect_ratio}
+            payload.setdefault("video_config", {})["aspect_ratio"] = aspect_ratio
+        if duration_seconds:
+            payload.setdefault("video_config", {})["seconds"] = duration_seconds
 
-        logger.info(f"[api.chat] aspect_ratio={aspect_ratio}, payload_keys={list(payload.keys())}")
+        logger.info(
+            f"[api.chat] aspect_ratio={aspect_ratio}, duration={duration_seconds or 'default'}, "
+            f"payload_keys={list(payload.keys())}"
+        )
 
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
         timeout = httpx.Timeout(connect=20.0, read=self.timeout_seconds, write=60.0, pool=self.timeout_seconds + 10)
@@ -93,7 +99,8 @@ class ApiClient:
         for i in range(self.max_retry_attempts):
             try:
                 logger.info(
-                    f"调用 Chat API (模型: {model}, aspect_ratio: {aspect_ratio or 'default'}, 尝试 {i + 1})"
+                    f"调用 Chat API (模型: {model}, aspect_ratio: {aspect_ratio or 'default'}, "
+                    f"duration: {duration_seconds or 'default'}, 尝试 {i + 1})"
                 )
                 r = await self.http_client.post(url, json=payload, headers=headers, timeout=timeout)
 

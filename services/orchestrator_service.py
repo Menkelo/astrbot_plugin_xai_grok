@@ -27,6 +27,22 @@ class OrchestratorService:
         allowed = {"1:1", "2:3", "3:2", "16:9", "9:16", "4:3", "3:4"}
         return ratio if ratio in allowed else None
 
+    @staticmethod
+    def _detect_video_duration_token(text: str) -> Optional[int]:
+        """
+        提取视频时长标记，仅用于状态展示。
+        """
+        s = str(text or "")
+        m = re.search(
+            r"(?<!\d)(\d{1,3})\s*(?:seconds?|secs?|s|秒(?:钟)?)(?![a-zA-Z0-9])",
+            s,
+            flags=re.I
+        )
+        if not m:
+            return None
+        duration = int(m.group(1))
+        return duration if duration == 15 else None
+
     async def start_once(
         self,
         event,
@@ -38,7 +54,11 @@ class OrchestratorService:
         prompt = (prompt or "").replace("用户：", "").replace("User:", "").strip()
 
         detected_ratio = self._detect_ratio_token(prompt)
-        logger.info(f"[orchestrator] raw_prompt={prompt!r}, detected_ratio={detected_ratio}")
+        detected_duration = self._detect_video_duration_token(prompt) if task_type == "video" else None
+        logger.info(
+            f"[orchestrator] raw_prompt={prompt!r}, detected_ratio={detected_ratio}, "
+            f"detected_duration={detected_duration}"
+        )
 
         # 预设逻辑保持：仅 edit 可用
         if task_type == "edit":
@@ -73,6 +93,8 @@ class OrchestratorService:
             # 文生视频显示比例标签（图生视频不显示）
             if task_type == "video" and (not image_base64) and detected_ratio:
                 status_msg += f" [{detected_ratio}]"
+            if task_type == "video" and detected_duration:
+                status_msg += f" [{detected_duration}s]"
 
             status_msg += "..."
             yield event.plain_result(status_msg)
@@ -86,29 +108,3 @@ class OrchestratorService:
                 task_type=task_type
             )
         )
-
-    async def start_repeat(
-        self,
-        event,
-        prompt: str,
-        task_type: str,
-        image_base64: Optional[str],
-        times: int
-    ) -> AsyncGenerator:
-        times = max(1, int(times or 1))
-        for i in range(times):
-            async for res in self.start_once(
-                event=event,
-                prompt=prompt,
-                task_type=task_type,
-                image_base64=image_base64,
-                show_status=(i == 0)
-            ):
-                yield res
-
-    @staticmethod
-    def parse_repeat_command(text: str, cmd: str):
-        m = re.search(rf"[\\/!]?{re.escape(cmd)}(\d+)\s*([\s\S]*)", (text or "").strip(), re.S)
-        if not m:
-            return None, None
-        return int(m.group(1)), (m.group(2) or "").strip()

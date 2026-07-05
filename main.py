@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 
 import httpx
@@ -106,41 +105,6 @@ class GrokMediaPlugin(Star):
         ):
             yield res
 
-    @filter.regex(r"[\\/!]?视频(\d+)")
-    async def cmd_video_repeat(self, event: AstrMessageEvent):
-        count, prompt = self.orchestrator.parse_repeat_command(event.message_str, "视频")
-        if not count:
-            return
-
-        # 兜底提取，避免某些平台 regex 内容丢失
-        if not (prompt or "").strip():
-            prompt = extract_prompt_after_command(event.message_str, "视频")
-
-        if not (prompt or "").strip():
-            yield event.plain_result("❌ 请输入视频提示词，例如：/视频3 一只猫在跑步 1:1")
-            return
-
-        images = await self.image_service.extract_images_from_message(
-            event, crop_for_video=True, target_index=0
-        )
-        image_base64 = images[0] if images else None
-
-        if image_base64:
-            logger.info(f"[视频批量] 检测到参考图，次数={count}，走图生视频")
-        else:
-            logger.info(f"[视频批量] 未检测到参考图，次数={count}，走文生视频")
-
-        logger.info(f"[视频批量] final_prompt={prompt!r}")
-
-        async for res in self.orchestrator.start_repeat(
-            event=event,
-            prompt=prompt,
-            task_type="video",
-            image_base64=image_base64,
-            times=count
-        ):
-            yield res
-
     @filter.command("画图")
     async def cmd_image_gen(self, event: AstrMessageEvent, *, prompt: str = ""):
         prompt = extract_prompt_after_command(event.message_str, "画图")
@@ -170,40 +134,5 @@ class GrokMediaPlugin(Star):
                 task_type="image",
                 image_base64=None,
                 show_status=True
-            ):
-                yield res
-
-    @filter.regex(r"[\\/!]?画图(\d+)")
-    async def cmd_image_repeat(self, event: AstrMessageEvent):
-        count, prompt = self.orchestrator.parse_repeat_command(event.message_str, "画图")
-        if not count:
-            return
-
-        if not (prompt or "").strip():
-            prompt = extract_prompt_after_command(event.message_str, "画图")
-
-        if not (prompt or "").strip():
-            yield event.plain_result("❌ 请输入图片提示词，例如：/画图3 一只猫 1:1")
-            return
-
-        images = await self.image_service.extract_images_from_message(
-            event, crop_for_video=False, target_index=0
-        )
-        if images:
-            async for res in self.orchestrator.start_repeat(
-                event=event,
-                prompt=prompt,
-                task_type="edit",
-                image_base64=images[0],
-                times=count
-            ):
-                yield res
-        else:
-            async for res in self.orchestrator.start_repeat(
-                event=event,
-                prompt=prompt,
-                task_type="image",
-                image_base64=None,
-                times=count
             ):
                 yield res
