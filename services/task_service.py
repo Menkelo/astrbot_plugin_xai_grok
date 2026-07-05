@@ -22,6 +22,13 @@ class TaskService:
         "4:3": "1792x1024",
         "3:4": "1024x1792",
     }
+    VIDEO_SIZE_RATIO_MAP = {
+        "1024x1024": "1:1",
+        "1280x720": "16:9",
+        "720x1280": "9:16",
+        "1024x1792": "2:3",
+        "1792x1024": "3:2",
+    }
 
     def __init__(self, plugin, provider_resolver, api_client, media_service, send_service):
         self.plugin = plugin
@@ -39,12 +46,22 @@ class TaskService:
         if self.download_retry_delay_seconds <= 0:
             self.download_retry_delay_seconds = 1.0
 
-    def _select_provider_id(self, task_type: str) -> str:
+    def _select_provider_id(self, task_type: str, image_base64: Optional[str] = None) -> str:
         if task_type == "video":
-            return self.plugin.video_provider_id
+            if image_base64:
+                return self.plugin.video_i2v_provider_id or self.plugin.video_provider_id
+            return self.plugin.video_t2v_provider_id or self.plugin.video_provider_id
         if task_type == "edit":
             return self.plugin.image_edit_provider_id
         return self.plugin.image_gen_provider_id
+
+    @staticmethod
+    def _select_provider_role(task_type: str, image_base64: Optional[str] = None) -> str:
+        if task_type == "video":
+            return "i2v" if image_base64 else "t2v"
+        if task_type == "edit":
+            return "edit"
+        return "image"
 
     @staticmethod
     def _is_grok_41(model: str) -> bool:
@@ -55,6 +72,16 @@ class TaskService:
     def _is_xai_video_15(model: str) -> bool:
         m = str(model or "").strip().lower()
         return "grok-imagine-video-1.5" in m
+
+    @staticmethod
+    def _uses_xai_video_generation_api(model: str) -> bool:
+        m = str(model or "").strip().lower()
+        return m.startswith("grok-imagine-video")
+
+    @staticmethod
+    def _is_image_only_video_model(model: str) -> bool:
+        m = str(model or "").strip().lower()
+        return "grok-imagine-video-1.5-preview" in m
 
     @staticmethod
     def _is_tool_usage_card_response(resp: dict) -> bool:
@@ -179,6 +206,42 @@ class TaskService:
         return cls.VIDEO_RATIO_SIZE_MAP.get(aspect_ratio)
 
     @classmethod
+    def _extract_video_shape(cls, prompt: str, strip_token: bool = True) -> Tuple[str, Optional[str], Optional[str]]:
+        text = str(prompt or "")
+        aspect_ratio = None
+        video_size = None
+
+        m_size = re.search(r"(?<!\d)(\d{2,5})\s*[xX×]\s*(\d{2,5})(?!\d)", text)
+        if m_size:
+            candidate = f"{m_size.group(1)}x{m_size.group(2)}"
+            mapped_ratio = cls.VIDEO_SIZE_RATIO_MAP.get(candidate)
+            if mapped_ratio:
+                video_size = candidate
+                aspect_ratio = mapped_ratio
+                if strip_token:
+                    text = text[:m_size.start()] + " " + text[m_size.end():]
+
+        if not aspect_ratio:
+            text, aspect_ratio = cls._extract_aspect_ratio_for_video(text, strip_token=strip_token)
+            video_size = cls._video_size_for_aspect_ratio(aspect_ratio)
+
+        text = re.sub(r"\s+", " ", text).strip()
+        return text, aspect_ratio, video_size
+
+    @staticmethod
+    def _extract_video_resolution(prompt: str) -> Tuple[str, Optional[str]]:
+        text = str(prompt or "")
+        resolution = None
+
+        m = re.search(r"(?<!\d)(480|720|1080)\s*p(?![a-zA-Z0-9])", text, flags=re.I)
+        if m:
+            resolution = f"{m.group(1)}p".lower()
+            text = text[:m.start()] + " " + text[m.end():]
+
+        text = re.sub(r"\s+", " ", text).strip()
+        return text, resolution
+
+    @classmethod
     def _extract_duration_for_video(cls, prompt: str) -> Tuple[str, Optional[int]]:
         text = str(prompt or "")
         duration_seconds = None
@@ -200,16 +263,16 @@ class TaskService:
     def _backend_duration_for_video(
         cls,
         duration_seconds: Optional[int],
-        model: str
+        use_xai_video_generation_api: bool
     ) -> Tuple[Optional[int], Optional[str]]:
         if not duration_seconds:
             return None, None
 
-        if cls._is_xai_video_15(model):
+        if use_xai_video_generation_api:
             if cls.XAI_VIDEO_15_MIN_DURATION <= duration_seconds <= cls.XAI_VIDEO_15_MAX_DURATION:
                 return duration_seconds, None
             return None, (
-                "grok-imagine-video-1.5 系列仅支持 1-15 秒视频时长，"
+                "xAI 视频生成接口仅支持 1-15 秒视频时长，"
                 f"当前输入: {duration_seconds}s"
             )
 
@@ -219,6 +282,13 @@ class TaskService:
             return duration_seconds, None
         allowed = "6 / 10 / 12 / 16 / 20"
         return None, f"当前视频后端仅支持 {allowed} 秒；15s 会自动按 16s 兼容"
+
+    @staticmethod
+    def _should_fallback_to_legacy_video(error: Optional[str]) -> bool:
+        if not error:
+            return False
+        e = str(error).lower()
+        return "404" in e or "405" in e or "not found" in e or "method not allowed" in e
 
     async def _download_with_retry(self, url: str, base_url: str, api_key: str) -> Tuple[Optional[str], Optional[str]]:
         last_err = None
@@ -251,7 +321,7 @@ class TaskService:
         local_paths: List[str] = []
 
         try:
-            provider_id = self._select_provider_id(task_type)
+            provider_id = self._select_provider_id(task_type, image_base64)
             runtime, perr = self.provider_resolver.parse(provider_id)
             if perr or not runtime:
                 await self.send_service.reply_error(event, f"❌ {perr}")
@@ -378,41 +448,54 @@ class TaskService:
                 video_duration_seconds = None
                 backend_duration_seconds = None
                 video_size = None
+                video_resolution = None
                 is_xai_video_15 = self._is_xai_video_15(runtime.model)
+                use_xai_video_generation_api = self._uses_xai_video_generation_api(runtime.model)
+                is_i2v_only_video_model = self._is_image_only_video_model(runtime.model)
+
+                if is_i2v_only_video_model and not image_base64:
+                    await self.send_service.reply_error(
+                        event,
+                        "❌ 当前视频模型仅支持图生视频。请发送/引用图片，或在配置中为文生视频选择 grok-imagine-video。"
+                    )
+                    return
 
                 video_prompt, video_duration_seconds = self._extract_duration_for_video(video_prompt)
+                video_prompt, video_resolution = self._extract_video_resolution(video_prompt)
                 backend_duration_seconds, duration_error = self._backend_duration_for_video(
                     video_duration_seconds,
-                    runtime.model
+                    use_xai_video_generation_api
                 )
                 if duration_error:
                     await self.send_service.reply_error(event, f"❌ {duration_error}")
                     return
 
-                video_prompt, video_aspect_ratio = self._extract_aspect_ratio_for_video(
+                video_prompt, video_aspect_ratio, video_size = self._extract_video_shape(
                     video_prompt,
-                    strip_token=(not is_xai_video_15)
+                    strip_token=True
                 )
-                if not is_xai_video_15:
-                    video_size = self._video_size_for_aspect_ratio(video_aspect_ratio)
 
                 logger.info(
                     f"[task.video] input_prompt={prompt!r}, parsed_prompt={video_prompt!r}, "
                     f"aspect_ratio={video_aspect_ratio or 'default'}, video_size={video_size or 'default'}, "
+                    f"resolution={video_resolution or 'default'}, "
                     f"duration_requested={video_duration_seconds or 'default'}, "
                     f"duration_backend={backend_duration_seconds or 'default'}, "
-                    f"xai_video_15={is_xai_video_15}"
+                    f"xai_video_15={is_xai_video_15}, "
+                    f"xai_video_api={use_xai_video_generation_api}, "
+                    f"i2v_only={is_i2v_only_video_model}"
                 )
                 logger.info(
                     f"任务路由: task_type=video, model={runtime.model}, "
                     f"mode={'i2v' if image_base64 else 't2v'}, "
                     f"aspect_ratio={video_aspect_ratio or 'default'}, video_size={video_size or 'default'}, "
+                    f"resolution={video_resolution or 'default'}, "
                     f"duration_requested={video_duration_seconds or 'default'}, "
                     f"duration_backend={backend_duration_seconds or 'default'}, "
-                    f"api={'videos/generations' if is_xai_video_15 else 'chat/completions'}"
+                    f"api={'videos/generations' if use_xai_video_generation_api else 'chat/completions'}"
                 )
 
-                if is_xai_video_15:
+                if use_xai_video_generation_api:
                     resp, error = await self.api_client.call_video_generation(
                         prompt=video_prompt,
                         image_base64=image_base64,
@@ -420,8 +503,34 @@ class TaskService:
                         base_url=runtime.base_url,
                         api_key=runtime.api_key,
                         duration_seconds=backend_duration_seconds,
-                        aspect_ratio=video_aspect_ratio
+                        aspect_ratio=video_aspect_ratio,
+                        resolution=video_resolution
                     )
+
+                    if error and self._should_fallback_to_legacy_video(error):
+                        logger.warning(
+                            f"[task.video] videos/generations 不可用，尝试回退 chat/completions: {error}"
+                        )
+                        legacy_duration_seconds, legacy_duration_error = self._backend_duration_for_video(
+                            video_duration_seconds,
+                            False
+                        )
+                        if legacy_duration_error:
+                            await self.send_service.reply_error(
+                                event,
+                                f"❌ xAI 视频接口不可用（{error}），且旧视频链路不支持该时长：{legacy_duration_error}"
+                            )
+                            return
+                        resp, error = await self.api_client.call_chat(
+                            prompt=video_prompt,
+                            image_base64=image_base64,
+                            model=runtime.model,
+                            base_url=runtime.base_url,
+                            api_key=runtime.api_key,
+                            aspect_ratio=video_aspect_ratio,
+                            duration_seconds=legacy_duration_seconds,
+                            video_size=video_size
+                        )
                 else:
                     resp, error = await self.api_client.call_chat(
                         prompt=video_prompt,

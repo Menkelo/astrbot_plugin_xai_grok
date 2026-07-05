@@ -24,6 +24,8 @@ class GrokMediaPlugin(Star):
 
         # Provider 配置
         self.video_provider_id = config.get("video_provider_id", "")
+        self.video_t2v_provider_id = config.get("video_t2v_provider_id", "")
+        self.video_i2v_provider_id = config.get("video_i2v_provider_id", "")
         self.image_gen_provider_id = config.get("image_gen_provider_id", "")
         self.image_edit_provider_id = config.get("image_edit_provider_id", "")
 
@@ -67,6 +69,8 @@ class GrokMediaPlugin(Star):
         logger.info(
             "Grok-Imagine已初始化: "
             f"video={self.video_provider_id or '-'}, "
+            f"video_t2v={self.video_t2v_provider_id or '-'}, "
+            f"video_i2v={self.video_i2v_provider_id or '-'}, "
             f"image_gen={self.image_gen_provider_id or '-'}, "
             f"image_edit={self.image_edit_provider_id or '-'}"
         )

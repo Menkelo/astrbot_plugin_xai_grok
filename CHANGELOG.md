@@ -1,3 +1,18 @@
+# [v1.1.5] - 拆分文生视频与图生视频槽位
+
+* **🎬 视频配置**
+  * 新增 `video_t2v_provider_id` 文生视频槽位和 `video_i2v_provider_id` 图生视频槽位
+  * `video_provider_id` 保留为默认回退槽位，兼容旧配置
+  * `grok-imagine-video-1.5-preview` 无参考图时会提示仅支持图生视频
+
+* **🎞️ 视频参数**
+  * 官方 `grok-imagine-video*` 视频接口优先走 `/v1/videos/generations`
+  * 官方 xAI 视频接口透传 `aspect_ratio` 和 `resolution`
+  * 支持从 `1024x1024 / 1024x1792 / 1280x720 / 1792x1024 / 720x1280` 映射视频比例
+  * 旧后端不支持 `/v1/videos/generations` 时会回退到 `chat/completions` 视频链路
+
+---
+
 # [v1.1.4] - 兼容 grok-imagine-video-1.5
 
 * **🎬 视频生成**

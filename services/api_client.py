@@ -158,11 +158,12 @@ class ApiClient:
         base_url: str,
         api_key: str,
         duration_seconds: Optional[int] = None,
-        aspect_ratio: Optional[str] = None
+        aspect_ratio: Optional[str] = None,
+        resolution: Optional[str] = None
     ) -> Tuple[Optional[dict], Optional[str]]:
         """
         xAI Imagine Video API: POST /v1/videos/generations, then poll /v1/videos/{request_id}.
-        grok-imagine-video-1.5 supports duration in the 1-15 second range.
+        xAI grok-imagine-video models support duration in the 1-15 second range.
         """
         url = self.endpoint(base_url, "videos/generations")
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
@@ -177,10 +178,15 @@ class ApiClient:
         if duration_seconds:
             payload["duration"] = duration_seconds
             payload["seconds"] = duration_seconds
+        if aspect_ratio:
+            payload["aspect_ratio"] = aspect_ratio
+        if resolution:
+            payload["resolution"] = resolution
 
         logger.info(
             f"[api.video_generation] model={model}, duration={duration_seconds or 'default'}, "
-            f"aspect_ratio_hint={aspect_ratio or 'default'}, payload_keys={list(payload.keys())}"
+            f"aspect_ratio={aspect_ratio or 'default'}, resolution={resolution or 'default'}, "
+            f"payload_keys={list(payload.keys())}"
         )
 
         last_error = "未知错误"

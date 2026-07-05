@@ -1,9 +1,21 @@
 {
   "video_provider_id": {
-    "description": "视频模型提供商",
+    "description": "默认视频模型提供商",
     "type": "string",
     "_special": "select_provider",
-    "hint": "请选择可用于视频生成的提供商模型（如 grok-imagine-1.0-video）"
+    "hint": "作为文生视频/图生视频未单独配置时的回退模型（如 grok-imagine-video）"
+  },
+  "video_t2v_provider_id": {
+    "description": "文生视频模型提供商",
+    "type": "string",
+    "_special": "select_provider",
+    "hint": "无参考图时使用。建议选择支持文生视频的模型（如 grok-imagine-video）"
+  },
+  "video_i2v_provider_id": {
+    "description": "图生视频模型提供商",
+    "type": "string",
+    "_special": "select_provider",
+    "hint": "有参考图时使用。可选择仅支持图生视频的模型（如 grok-imagine-video-1.5-preview）"
   },
   "image_gen_provider_id": {
     "description": "文生图模型提供商",
