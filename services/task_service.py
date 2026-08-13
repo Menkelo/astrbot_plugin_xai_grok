@@ -313,6 +313,21 @@ class TaskService:
         text = re.sub(r"\s+", " ", text).strip()
         return text, duration_seconds
 
+    async def _detect_ref_ratio(
+        self,
+        image_url: Optional[str],
+        image_base64: Optional[str]
+    ) -> Optional[str]:
+        """探测参考图实际比例（就近映射到后端支持比例），失败返回 None"""
+        svc = getattr(self.plugin, "image_service", None)
+        if svc is None or not hasattr(svc, "detect_aspect_ratio"):
+            return None
+        try:
+            return await svc.detect_aspect_ratio(image_url, image_base64)
+        except Exception as e:
+            logger.warning(f"[task.video] 参考图比例探测失败: {e}")
+            return None
+
     def _default_video_duration(self) -> Optional[int]:
         """配置面板滑动条设置的视频默认时长（1-15s），未配置返回 None"""
         conf = getattr(self.plugin, "config", {}) or {}
@@ -560,6 +575,16 @@ class TaskService:
                     video_prompt,
                     strip_token=True
                 )
+
+                # 图生视频未指定比例时，按参考图实际比例生成（新/旧视频链路统一）
+                if not video_aspect_ratio and (image_url or image_base64):
+                    detected_ratio = await self._detect_ref_ratio(image_url, image_base64)
+                    if detected_ratio:
+                        logger.info(
+                            f"[task.video] 未指定比例，按参考图比例: {detected_ratio}"
+                        )
+                        video_aspect_ratio = detected_ratio
+                        video_size = self._video_size_for_aspect_ratio(video_aspect_ratio)
 
                 if is_video_api:
                     # Grok2API 新版 /v1/videos/generations 异步任务链路

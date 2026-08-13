@@ -19,10 +19,72 @@ except ImportError:
 
 
 class ImageService:
+    # 后端视频支持的比例集合，用于将参考图比例就近映射
+    SUPPORTED_VIDEO_RATIOS = {
+        "1:1": 1.0,
+        "2:3": 2 / 3,
+        "3:2": 3 / 2,
+        "4:3": 4 / 3,
+        "3:4": 3 / 4,
+        "16:9": 16 / 9,
+        "9:16": 9 / 16,
+    }
+
     def __init__(self, http_client: httpx.AsyncClient, context, max_image_size=5 * 1024 * 1024):
         self.http_client = http_client
         self.context = context
         self.max_image_size = max_image_size
+
+    async def detect_aspect_ratio(
+        self,
+        image_url: Optional[str],
+        image_base64: Optional[str]
+    ) -> Optional[str]:
+        """探测参考图实际比例，就近映射到后端支持的比例字符串（如 2:3）。
+
+        优先取原始 http URL；失败或仅 base64 时取 base64。读取失败返回 None。
+        """
+        raw = None
+
+        if image_url and str(image_url).startswith("http"):
+            try:
+                r = await self.http_client.get(str(image_url), timeout=httpx.Timeout(30.0))
+                if r.status_code == 200:
+                    raw = r.content
+            except Exception:
+                raw = None
+
+        if raw is None and image_base64:
+            try:
+                data = str(image_base64)
+                if "," in data:
+                    _, data = data.split(",", 1)
+                data = re.sub(r"[^a-zA-Z0-9+/=]", "", data)
+                raw = base64.b64decode(data)
+            except Exception:
+                raw = None
+
+        if not raw or not PILImage:
+            return None
+
+        try:
+            with io.BytesIO(raw) as buf:
+                img = PILImage.open(buf)
+                w, h = img.size
+                if w <= 0 or h <= 0:
+                    return None
+                ratio = w / h
+                best = min(
+                    self.SUPPORTED_VIDEO_RATIOS,
+                    key=lambda k: abs(self.SUPPORTED_VIDEO_RATIOS[k] - ratio)
+                )
+                logger.info(
+                    f"[video.ratio] 参考图 {w}x{h} (ratio={ratio:.4f}) → 视频比例 {best}"
+                )
+                return best
+        except Exception as e:
+            logger.warning(f"[video.ratio] 参考图比例探测失败: {e}")
+            return None
 
     @staticmethod
     def _format_base64(base64_str: str) -> str:
