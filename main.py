@@ -41,7 +41,6 @@ class GrokMediaPlugin(Star):
             self.video_default_duration = 0
 
         self.timeout_seconds = 180
-        self.max_retry_attempts = 3
         self.max_image_size = 5 * 1024 * 1024
         self.save_video_enabled = False
 
@@ -58,7 +57,7 @@ class GrokMediaPlugin(Star):
 
         # services
         self.provider_resolver = ProviderResolver(self.context)
-        self.api_client = ApiClient(self.http_client, self.timeout_seconds, self.max_retry_attempts)
+        self.api_client = ApiClient(self.http_client, self.timeout_seconds)
         self.image_service = ImageService(self.http_client, self.context, self.max_image_size)
         self.media_service = MediaService(self.http_client, self.data_dir)
         self.preset_service = PresetService(self.context)

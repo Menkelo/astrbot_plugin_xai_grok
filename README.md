@@ -53,7 +53,7 @@
 - 可写 `480p`、`720p`、`1080p` 透传 `resolution`
 - 图生视频指定与原图不同的比例时，参考图会先做等比画布适配，避免被后端拉伸
 - 图生视频未指定比例时，自动按参考图实际比例生成（就近映射到 `1:1 / 2:3 / 3:2 / 4:3 / 3:4 / 16:9 / 9:16`），不会默认 16:9
-- 所有请求遇「上游服务暂不可用(503)」会自动重试（Grok2API 后端会把上游 401/403/额度耗尽统一掩码为 503，多为瞬时状态）
+- 所有 imagine 媒体请求统一走 Console 上游（模型自动带 `Console/` 前缀）；请求重试由 Grok2API 后端管理，插件单次调用
 - `grok-imagine-video*` 系列走 Grok2API 新版 `/v1/videos/generations` 异步任务链路
   - 支持 `1-15s` 时长（透传 `duration`；未指定时使用配置面板的「视频默认时长」滑动条，未设置则后端决定）
   - 支持比例透传 `aspect_ratio`（`1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3`）
@@ -210,14 +210,16 @@
 | 图生图 | `grok-imagine-image-edit`、`grok-imagine-image`、`grok-imagine-image-quality` | `/v1/images/edits`（JSON，参考图 `image.url`） |
 | 对话生图 | `grok-4.3`、`grok-4.5`、`grok-4.20-0309-reasoning`、`grok-4.20-multi-agent-0309`、`grok-chat-fast/auto/expert/heavy`、`grok-build-0.1`、`grok-composer-2.5-fast` | `/v1/chat/completions` |
 
-### 自动模型探测与回退
+### Console 路由（媒体生成统一走 Console 上游）
 
-调用 `/v1/images/generations`、`/v1/images/edits`、`/v1/videos/generations` 前，插件会探测 `GET /v1/models` 获取后端当前可用模型列表（短时缓存 5 分钟）：
+插件面向 Grok2API 的 **Console provider** 账号池，所有 imagine 系列媒体生成模型在请求时统一携带 `Console/` 前缀：
 
-- 配置的 imagine 系列模型不可用（如后端未启用、名称不一致）时，自动回退到同类候选模型
-- 回退按候选顺序依次尝试：图片 `grok-imagine-image*` 系列、图生图 `grok-imagine-image-edit` 系列、视频 `grok-imagine-video*` 系列
-- 探测失败（接口不存在 / 网络异常）或候选全部不可用时不改写模型，沿用配置原值
-- 探测到的模型列表会记录在日志中，便于排查「模型不存在(404)」
+- 例如配置模型 `grok-imagine-image` 会以 `Console/grok-imagine-image` 发送，强制选中 Console 路由
+- 原因：Grok2API 后端按 `Build > Web > Console` 优先级展开无前缀模型名候选，优先选中 Web 路由，而 Web 上游对图生图常返回 403（被掩码为 503）
+- 已带其他前缀（`Web/`、`Build/`）的模型会自动替换为 `Console/` 前缀
+- 对话类模型（`grok-4.x` / `grok-chat-*` 等）不做改写
+
+> 请求重试由 Grok2API 后端负责，插件每次请求只发起单次调用。
 
 ---
 
@@ -237,10 +239,10 @@
 - Image Edit 接口：`/v1/images/edits`
   - 用于图生图（当模型是 `grok-imagine-image*`）
   - 新版为 JSON 接口，参考图走 `image.url`
-- 自动重试：
-  - 针对 429 / 部分 5xx 做有限重试
 - 发送失败兜底：
   - 图片发送异常时尝试 Base64 补发
+- 重试策略：
+  - 插件单次调用，重试由 Grok2API 后端管理
 - 临时文件管理：
   - 默认发送后清理，降低磁盘占用
 

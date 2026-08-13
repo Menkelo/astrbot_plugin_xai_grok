@@ -51,50 +51,23 @@ class TaskService:
             return self.plugin.video_provider_id or ""
         return self.plugin.image_provider_id or ""
 
-    # Grok2API / xAI 官方可用模型候选（按场景归类，仅用于 /v1/models 探测回退）
-    IMAGE_FALLBACK_CANDIDATES = [
-        "grok-imagine-image",
-        "grok-imagine-image-quality",
-        "grok-imagine-image-lite",
-        "grok-imagine-1.0",
-    ]
-    EDIT_FALLBACK_CANDIDATES = [
-        "grok-imagine-image",
-        "grok-imagine-image-edit",
-        "grok-imagine-image-lite",
-        "grok-imagine-1.0-edit",
-    ]
-    VIDEO_FALLBACK_CANDIDATES = [
-        "grok-imagine-video",
-        "grok-imagine-video-1.5-preview",
-        "grok-imagine-1.0-video",
-    ]
+    # Grok2API 媒体生成统一走 Console 路由（Grok2API 后端按 Build>Web>Console 展开
+    # 无前缀模型候选并优先选中 Web，Web 图生图常被上游 403 掩码为 503；
+    # 插件只面向 Console 路由，模型名统一带 Console/ 前缀）。
 
     async def _resolve_task_model(self, task_type: str, model: str, base_url: str, api_key: str) -> str:
-        """探测 /v1/models 并在配置模型不可用时回退到同类候选。
+        """强制将 imagine 媒体模型统一为 Console 路由。
 
-        仅对 imagine 系列模型做探测回退；对话类模型生图不受影响。
+        Grok2API 后端按 Build>Web>Console 优先级展开无前缀模型名候选并优先选中 Web 路由；
+        插件只面向 Console 路由，因此对 imagine 系列模型统一补 Console/ 前缀。
+        已带前缀或非 imagine 模型保持原样。
         """
+        _ = (base_url, api_key, task_type)
         if not model:
             return model
-        m = str(model).strip().lower()
-        if "imagine" not in m:
+        if "imagine" not in str(model).strip().lower():
             return model
-
-        if task_type == "video":
-            candidates = self.VIDEO_FALLBACK_CANDIDATES
-        elif task_type == "edit":
-            candidates = self.EDIT_FALLBACK_CANDIDATES
-        else:
-            candidates = self.IMAGE_FALLBACK_CANDIDATES
-
-        return await self.api_client.resolve_model(
-            configured_model=model,
-            fallback_models=candidates,
-            base_url=base_url,
-            api_key=api_key,
-            scene=f"{task_type}-模型回退",
-        )
+        return self._console_route_model(model)
 
     @staticmethod
     def _is_chat_image_model(model: str) -> bool:
@@ -125,6 +98,32 @@ class TaskService:
         if "video" in m:
             return False
         return "imagine" in m
+
+    @staticmethod
+    def _model_provider_prefix(model: str) -> str:
+        """返回模型名携带的 provider 前缀（Build/Web/Console），无前缀返回空串。"""
+        m = str(model or "").strip()
+        if "/" in m:
+            prefix = m.split("/", 1)[0].strip()
+            if prefix.lower() in ("build", "web", "console"):
+                return prefix
+        return ""
+
+    @staticmethod
+    def _console_route_model(model: str) -> str:
+        """媒体生成统一走 Console 路由：给模型名补/替换为 Console/ 前缀。
+
+        Grok2API 后端按 Build>Web>Console 优先级展开无前缀模型名候选，会优先选中 Web 路由；
+        Web 上游对图生图常返回 403（被掩码为 503）。统一带 Console/ 前缀可强制选中 Console 路由。
+        """
+        m = str(model or "").strip()
+        if not m:
+            return m
+        prefix = TaskService._model_provider_prefix(m)
+        if prefix:
+            rest = m.split("/", 1)[1].strip()
+            return f"Console/{rest}"
+        return f"Console/{m}"
 
     @staticmethod
     def _is_imagine_video_model(model: str) -> bool:
@@ -423,7 +422,7 @@ class TaskService:
             )
             if resolved_model and resolved_model != runtime.model:
                 logger.warning(
-                    f"任务路由: 模型回退 {runtime.model} → {resolved_model}（task_type={task_type}）"
+                    f"任务路由: Console 路由 {runtime.model} → {resolved_model}（task_type={task_type}）"
                 )
                 runtime.model = resolved_model
 
