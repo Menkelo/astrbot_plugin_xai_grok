@@ -47,6 +47,23 @@ def extract_prompt_after_command(message_str: str, command: str) -> str:
     return normalize_spaces_keep_ratio(text)
 
 
+def extract_prompt_from_components(components, command: str) -> str:
+    """
+    从消息组件链中提取命令后的提示词，仅取 Plain 文本段。
+
+    平台适配器（如 aiocqhttp）会把 @用户 渲染进 message_str 为
+    " @昵称(QQ号) "，导致被 @ 的人的 QQ 号混入提示词。这里直接跳过
+    At / Image / Reply 等组件，只拼接纯文本段，避免该问题。
+    """
+    parts = []
+    for comp in components or []:
+        if getattr(comp, "type", None) == "Plain":
+            text = getattr(comp, "text", "") or ""
+            if text:
+                parts.append(str(text))
+    return extract_prompt_after_command(" ".join(parts), command)
+
+
 def normalize_spaces(text: str) -> str:
     """
     普通空白归一化：把连续空白折叠为1个空格

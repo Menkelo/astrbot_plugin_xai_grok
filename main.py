@@ -6,7 +6,7 @@ from astrbot.api.all import *
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 
-from .utils.text_utils import extract_prompt_after_command
+from .utils.text_utils import extract_prompt_from_components
 from .services.provider_resolver import ProviderResolver
 from .services.api_client import ApiClient
 from .services.image_service import ImageService
@@ -99,7 +99,8 @@ class GrokMediaPlugin(Star):
     @filter.command("视频")
     async def cmd_video_main(self, event: AstrMessageEvent, *, prompt: str = ""):
         # 关键修复：强制从原始消息提取，避免框架参数吞掉 “1:1”
-        prompt = extract_prompt_after_command(event.message_str, "视频")
+        # 从消息组件链取 Plain 文本，避免 @用户 被渲染为 " @昵称(QQ号) " 混入提示词
+        prompt = extract_prompt_from_components(event.message_obj.message, "视频")
 
         if not (prompt or "").strip():
             yield event.plain_result("❌ 请输入视频提示词，例如：/视频 一只猫在跑步 1:1")
@@ -151,7 +152,8 @@ class GrokMediaPlugin(Star):
 
     @filter.command("画图")
     async def cmd_image_gen(self, event: AstrMessageEvent, *, prompt: str = ""):
-        prompt = extract_prompt_after_command(event.message_str, "画图")
+        # 从消息组件链取 Plain 文本，避免 @用户 被渲染为 " @昵称(QQ号) " 混入提示词
+        prompt = extract_prompt_from_components(event.message_obj.message, "画图")
 
         if not (prompt or "").strip():
             yield event.plain_result("❌ 请输入图片提示词，例如：/画图 一只猫 1:1")
