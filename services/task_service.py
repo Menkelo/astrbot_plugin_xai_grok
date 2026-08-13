@@ -341,6 +341,20 @@ class TaskService:
             return d
         return None
 
+    def _default_video_resolution(self) -> Optional[str]:
+        """配置面板选择的视频默认格式（480p/720p/1080p），未配置返回 None"""
+        conf = getattr(self.plugin, "config", {}) or {}
+        raw = conf.get("video_default_resolution")
+        if raw is None:
+            raw = getattr(self.plugin, "video_default_resolution", None)
+        try:
+            resolution = str(raw).strip().lower()
+        except Exception:
+            return None
+        if resolution in ("480p", "720p", "1080p"):
+            return resolution
+        return None
+
     @classmethod
     def _duration_for_video_api(cls, duration_seconds: Optional[int]) -> Tuple[Optional[int], Optional[str]]:
         """Grok2API /v1/videos 链路时长：1-15 秒"""
@@ -471,7 +485,7 @@ class TaskService:
 
                     logger.info(
                         f"任务路由: task_type=image, api=images/generations, "
-                        f"model={runtime.model}, size={gen_size}"
+                        f"model={runtime.model}, size={gen_size}, resolution=2k"
                     )
 
                     resp, error = await self.api_client.call_generation(
@@ -479,7 +493,8 @@ class TaskService:
                         model=runtime.model,
                         base_url=runtime.base_url,
                         api_key=runtime.api_key,
-                        size=gen_size
+                        size=gen_size,
+                        resolution="2k"
                     )
                     if error:
                         await self.send_service.reply_error(event, f"❌ {error}")
@@ -528,7 +543,7 @@ class TaskService:
                     ref_url = image_url or image_base64
                     logger.info(
                         f"任务路由: task_type=edit, api=images/edits, "
-                        f"model={runtime.model}, size=follow-source, "
+                        f"model={runtime.model}, size=follow-source, resolution=2k, "
                         f"ref={'url' if image_url else 'data-url'}"
                     )
 
@@ -537,7 +552,8 @@ class TaskService:
                         image_url=ref_url,
                         model=runtime.model,
                         base_url=runtime.base_url,
-                        api_key=runtime.api_key
+                        api_key=runtime.api_key,
+                        resolution="2k"
                     )
                     if error:
                         await self.send_service.reply_error(event, f"❌ {error}")
@@ -570,6 +586,10 @@ class TaskService:
                         video_duration_seconds = configured
                         duration_from_config = True
                 video_prompt, video_resolution = self._extract_video_resolution(video_prompt)
+                if not video_resolution:
+                    configured_resolution = self._default_video_resolution()
+                    if configured_resolution:
+                        video_resolution = configured_resolution
                 video_prompt, video_aspect_ratio, video_size = self._extract_video_shape(
                     video_prompt,
                     strip_token=True

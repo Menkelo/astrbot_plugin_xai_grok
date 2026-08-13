@@ -40,6 +40,14 @@ class GrokMediaPlugin(Star):
         if self.video_default_duration < 1:
             self.video_default_duration = 0
 
+        # 视频默认格式（480p/720p/1080p），配置面板下拉控制，未配置时后端默认（720p）
+        try:
+            self.video_default_resolution = str(config.get("video_default_resolution", "") or "").strip().lower()
+        except Exception:
+            self.video_default_resolution = ""
+        if self.video_default_resolution not in ("480p", "720p", "1080p"):
+            self.video_default_resolution = ""
+
         self.timeout_seconds = 180
         self.max_image_size = 5 * 1024 * 1024
         self.save_video_enabled = False
@@ -80,7 +88,8 @@ class GrokMediaPlugin(Star):
             "Grok-Imagine已初始化: "
             f"image={self.image_provider_id or '-'}, "
             f"video={self.video_provider_id or '-'}, "
-            f"video_default_duration={self.video_default_duration or 'default'}"
+            f"video_default_duration={self.video_default_duration or 'default'}, "
+            f"video_default_resolution={self.video_default_resolution or 'default'}"
         )
 
     async def on_unload(self):

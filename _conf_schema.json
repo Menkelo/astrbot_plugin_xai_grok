@@ -17,5 +17,12 @@
     "default": 8,
     "slider": {"min": 1, "max": 15, "step": 1},
     "hint": "提示词未指定时长时使用的默认视频时长（1-15 秒）。新版 /v1/videos 链路直接使用；旧 chat 视频链路仅支持 6/10/12/16/20 秒，不支持时回退为后端默认"
+  },
+  "video_default_resolution": {
+    "description": "视频默认格式",
+    "type": "string",
+    "default": "720p",
+    "options": ["480p", "720p", "1080p"],
+    "hint": "提示词未指定 480p/720p/1080p 时使用的默认视频格式。注意：Console 上游 grok-imagine-video 仅支持 480p/720p，选择 1080p 时可能被后端拒绝"
   }
 }

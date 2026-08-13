@@ -314,7 +314,8 @@ class ApiClient:
         model: str,
         base_url: str,
         api_key: str,
-        size: Optional[str] = None
+        size: Optional[str] = None,
+        resolution: Optional[str] = "2k"
     ) -> Tuple[Optional[dict], Optional[str]]:
         url = self.endpoint(base_url, "images/generations")
 
@@ -326,12 +327,17 @@ class ApiClient:
         }
         if size:
             payload["size"] = size
+        if resolution:
+            payload["resolution"] = resolution
 
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
         timeout = httpx.Timeout(connect=20.0, read=self.timeout_seconds, write=60.0, pool=60.0)
 
         try:
-            logger.info(f"调用 Image Generation API (模型: {model}, size: {size or 'default'})")
+            logger.info(
+                f"调用 Image Generation API (模型: {model}, size: {size or 'default'}, "
+                f"resolution: {resolution or 'default'})"
+            )
             r = await self.http_client.post(url, json=payload, headers=headers, timeout=timeout)
 
             if r.status_code == 200:
@@ -356,7 +362,8 @@ class ApiClient:
         image_url: str,
         model: str,
         base_url: str,
-        api_key: str
+        api_key: str,
+        resolution: Optional[str] = "2k"
     ) -> Tuple[Optional[dict], Optional[str]]:
         """
         Grok2API 新版 /v1/images/edits 为 JSON 接口，参考图通过 image.url 传递。
@@ -376,9 +383,14 @@ class ApiClient:
             "n": 1,
             "image": {"url": image_url},
         }
+        if resolution:
+            payload["resolution"] = resolution
 
         try:
-            logger.info(f"调用 Image Edit API (模型: {model}, size: follow-source)")
+            logger.info(
+                f"调用 Image Edit API (模型: {model}, size: follow-source, "
+                f"resolution: {resolution or 'default'})"
+            )
 
             r = await self.http_client.post(
                 url,
