@@ -202,6 +202,11 @@ class ApiClient:
                     last_error = f"服务端错误(500): {t[:120]}"
                     continue
 
+                if r.status_code == 503:
+                    last_error = "上游服务暂不可用 (503)，正在重试..."
+                    await asyncio.sleep(3)
+                    continue
+
                 try:
                     err = r.json()
                     emsg = err.get("error", {}).get("message") or err.get("error")
@@ -302,6 +307,12 @@ class ApiClient:
                     await asyncio.sleep(2)
                     continue
 
+                if r.status_code == 503:
+                    # 上游服务暂不可用（Grok2API 后端掩码上游 401/403/额度耗尽），短暂等待后重试
+                    last_error = "上游服务暂不可用 (503)，正在重试..."
+                    await asyncio.sleep(3)
+                    continue
+
                 try:
                     err = r.json()
                     emsg = err.get("error", {}).get("message") or err.get("error")
@@ -363,8 +374,8 @@ class ApiClient:
 
                 elif r.status_code == 404:
                     return None, f"视频任务不存在或已过期: {request_id}"
-                elif r.status_code == 429:
-                    logger.warning("[video.job] 轮询触发限流(429)，稍后继续...")
+                elif r.status_code in (429, 503):
+                    logger.warning(f"[video.job] 轮询触发 {r.status_code}，稍后继续...")
                 else:
                     try:
                         err = r.json()
@@ -462,6 +473,11 @@ class ApiClient:
                     await asyncio.sleep(2)
                     continue
 
+                if r.status_code == 503:
+                    last_error = "上游服务暂不可用 (503)，正在重试..."
+                    await asyncio.sleep(3)
+                    continue
+
                 try:
                     err = r.json()
                     emsg = err.get("error", {}).get("message") or err.get("error")
@@ -525,6 +541,11 @@ class ApiClient:
                 if r.status_code == 429:
                     last_error = "触发限流 (429)，正在重试..."
                     await asyncio.sleep(2)
+                    continue
+
+                if r.status_code == 503:
+                    last_error = "上游服务暂不可用 (503)，正在重试..."
+                    await asyncio.sleep(3)
                     continue
 
                 try:
