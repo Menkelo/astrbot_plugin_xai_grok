@@ -1,3 +1,17 @@
+# [v1.1.13] - 配置面板简化与视频默认时长
+
+* **⚙️ 配置面板简化**
+  * 移除 `video_t2v_provider_id` / `video_i2v_provider_id` / `image_gen_provider_id` / `image_edit_provider_id` 四个槽位
+  * 现在只需配置两个模型提供商：`image_provider_id`（文生图/图生图共用）与 `video_provider_id`（文生视频/图生视频共用）
+  * 旧配置字段会自动回退迁移到新槽位，无需重新填写
+
+* **⏱️ 新增「视频默认时长」配置**
+  * `video_default_duration`（滑动条 1-15s）
+  * 提示词未指定时长时使用该默认时长
+  * 新版 `/v1/videos` 链路直接透传；旧 chat 视频链路仅在支持范围（6/10/12/16/20）内生效，否则回退为后端默认
+
+---
+
 # [v1.1.12] - 兼容 Grok2API 新版模型与接口
 
 * **🎬 视频链路切换（重要）**

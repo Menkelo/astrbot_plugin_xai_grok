@@ -53,13 +53,14 @@
 - 可写 `480p`、`720p`、`1080p` 透传 `resolution`
 - 图生视频指定与原图不同的比例时，参考图会先做等比画布适配，避免被后端拉伸
 - `grok-imagine-video*` 系列走 Grok2API 新版 `/v1/videos/generations` 异步任务链路
-  - 支持 `1-15s` 时长（透传 `duration`，默认由后端决定）
+  - 支持 `1-15s` 时长（透传 `duration`；未指定时使用配置面板的「视频默认时长」滑动条，未设置则后端决定）
   - 支持比例透传 `aspect_ratio`（`1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3`）
   - 图生视频参考图通过 `image.url` 传递，**要求公网 URL**；本地文件图片（仅有 base64）需配置对话类视频模型走 chat 链路
   - 完成后自动轮询任务并下载成片（视频 content 需携带鉴权，插件已处理）
-- `grok-imagine-video-1.5-preview` 仅用于图生视频；无参考图时请配置文生视频槽位为 `grok-imagine-video` 或当前后端支持的 chat 视频模型
+- `grok-imagine-video-1.5-preview` 仅用于图生视频；无参考图时请将视频模型配置为 `grok-imagine-video` 或当前后端支持的 chat 视频模型
 - 使用旧 Grok2API（Python 版）或手动配置的 chat 视频模型时，走 `/v1/chat/completions` 兜底链路
   - 时长支持 `6/10/12/16/20` 秒；`15s` 会按最接近的 `16s` 兼容
+  - 提示词未指定时长时，会尝试使用「视频默认时长」；若该值不被旧后端支持则回退为后端默认
   - 透传 `aspect_ratio` 与 `video_config.size`
 
 示例：
@@ -167,11 +168,9 @@
 
 ### `_conf_schema.json` 字段
 
-- `video_provider_id`：默认视频模型提供商（select_provider，作为回退槽位）
-- `video_t2v_provider_id`：文生视频模型提供商（select_provider，无参考图时优先使用）
-- `video_i2v_provider_id`：图生视频模型提供商（select_provider，有参考图时优先使用）
-- `image_gen_provider_id`：文生图模型提供商（select_provider）
-- `image_edit_provider_id`：图生图模型提供商（select_provider）
+- `image_provider_id`：图片模型提供商（select_provider，文生图 / 图生图共用）
+- `video_provider_id`：视频模型提供商（select_provider，文生视频 / 图生视频共用）
+- `video_default_duration`：视频默认时长（秒，滑动条 1-15s，提示词未指定时长时使用）
 
 ---
 

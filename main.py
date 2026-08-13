@@ -22,12 +22,23 @@ class GrokMediaPlugin(Star):
         super().__init__(context)
         self.config = config
 
-        # Provider 配置
-        self.video_provider_id = config.get("video_provider_id", "")
-        self.video_t2v_provider_id = config.get("video_t2v_provider_id", "")
-        self.video_i2v_provider_id = config.get("video_i2v_provider_id", "")
-        self.image_gen_provider_id = config.get("image_gen_provider_id", "")
-        self.image_edit_provider_id = config.get("image_edit_provider_id", "")
+        # Provider 配置（图片 / 视频 两个槽位，兼容旧字段回退）
+        self.image_provider_id = config.get("image_provider_id", "") or (
+            config.get("image_gen_provider_id", "")
+            or config.get("image_edit_provider_id", "")
+        )
+        self.video_provider_id = config.get("video_provider_id", "") or (
+            config.get("video_t2v_provider_id", "")
+            or config.get("video_i2v_provider_id", "")
+        )
+
+        # 视频默认时长（秒），配置面板滑动条控制，未配置时使用后端默认
+        try:
+            self.video_default_duration = int(config.get("video_default_duration", 0) or 0)
+        except (TypeError, ValueError):
+            self.video_default_duration = 0
+        if self.video_default_duration < 1:
+            self.video_default_duration = 0
 
         self.timeout_seconds = 180
         self.max_retry_attempts = 3
@@ -68,11 +79,9 @@ class GrokMediaPlugin(Star):
 
         logger.info(
             "Grok-Imagine已初始化: "
+            f"image={self.image_provider_id or '-'}, "
             f"video={self.video_provider_id or '-'}, "
-            f"video_t2v={self.video_t2v_provider_id or '-'}, "
-            f"video_i2v={self.video_i2v_provider_id or '-'}, "
-            f"image_gen={self.image_gen_provider_id or '-'}, "
-            f"image_edit={self.image_edit_provider_id or '-'}"
+            f"video_default_duration={self.video_default_duration or 'default'}"
         )
 
     async def on_unload(self):

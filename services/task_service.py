@@ -46,33 +46,10 @@ class TaskService:
         if self.download_retry_delay_seconds <= 0:
             self.download_retry_delay_seconds = 1.0
 
-    def _select_provider_id(
-        self,
-        task_type: str,
-        image_base64: Optional[str] = None,
-        image_url: Optional[str] = None
-    ) -> str:
-        has_reference = bool(image_base64 or image_url)
+    def _select_provider_id(self, task_type: str) -> str:
         if task_type == "video":
-            if has_reference:
-                return self.plugin.video_i2v_provider_id or self.plugin.video_provider_id
-            return self.plugin.video_t2v_provider_id or self.plugin.video_provider_id
-        if task_type == "edit":
-            return self.plugin.image_edit_provider_id
-        return self.plugin.image_gen_provider_id
-
-    @staticmethod
-    def _select_provider_role(
-        task_type: str,
-        image_base64: Optional[str] = None,
-        image_url: Optional[str] = None
-    ) -> str:
-        has_reference = bool(image_base64 or image_url)
-        if task_type == "video":
-            return "i2v" if has_reference else "t2v"
-        if task_type == "edit":
-            return "edit"
-        return "image"
+            return self.plugin.video_provider_id or ""
+        return self.plugin.image_provider_id or ""
 
     @staticmethod
     def _is_chat_image_model(model: str) -> bool:
@@ -291,6 +268,20 @@ class TaskService:
         text = re.sub(r"\s+", " ", text).strip()
         return text, duration_seconds
 
+    def _default_video_duration(self) -> Optional[int]:
+        """配置面板滑动条设置的视频默认时长（1-15s），未配置返回 None"""
+        conf = getattr(self.plugin, "config", {}) or {}
+        raw = conf.get("video_default_duration")
+        if raw is None:
+            raw = getattr(self.plugin, "video_default_duration", None)
+        try:
+            d = int(raw)
+        except (TypeError, ValueError):
+            return None
+        if self.XAI_VIDEO_15_MIN_DURATION <= d <= self.XAI_VIDEO_15_MAX_DURATION:
+            return d
+        return None
+
     @classmethod
     def _duration_for_video_api(cls, duration_seconds: Optional[int]) -> Tuple[Optional[int], Optional[str]]:
         """Grok2API /v1/videos 链路时长：1-15 秒"""
@@ -358,7 +349,7 @@ class TaskService:
         local_paths: List[str] = []
 
         try:
-            provider_id = self._select_provider_id(task_type, image_base64, image_url)
+            provider_id = self._select_provider_id(task_type)
             runtime, perr = self.provider_resolver.parse(provider_id)
             if perr or not runtime:
                 await self.send_service.reply_error(event, f"❌ {perr}")
@@ -501,6 +492,12 @@ class TaskService:
                     return
 
                 video_prompt, video_duration_seconds = self._extract_duration_for_video(video_prompt)
+                duration_from_config = False
+                if not video_duration_seconds:
+                    configured = self._default_video_duration()
+                    if configured:
+                        video_duration_seconds = configured
+                        duration_from_config = True
                 video_prompt, video_resolution = self._extract_video_resolution(video_prompt)
                 video_prompt, video_aspect_ratio, video_size = self._extract_video_shape(
                     video_prompt,
@@ -562,8 +559,16 @@ class TaskService:
                         runtime.model
                     )
                     if duration_error:
-                        await self.send_service.reply_error(event, f"❌ {duration_error}")
-                        return
+                        # 默认时长（来自配置）不被旧后端支持时回退为后端默认
+                        if duration_from_config:
+                            logger.warning(
+                                f"配置默认时长 {video_duration_seconds}s 不被旧视频后端支持，"
+                                f"回退为后端默认: {duration_error}"
+                            )
+                            backend_duration_seconds, duration_error = None, None
+                        else:
+                            await self.send_service.reply_error(event, f"❌ {duration_error}")
+                            return
 
                     logger.info(
                         f"[task.video] input_prompt={prompt!r}, parsed_prompt={video_prompt!r}, "

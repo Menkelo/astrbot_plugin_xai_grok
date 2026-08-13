@@ -1,32 +1,21 @@
 {
+  "image_provider_id": {
+    "description": "图片模型提供商",
+    "type": "string",
+    "_special": "select_provider",
+    "hint": "用于 /画图（文生图与图生图共用）。可选 grok-imagine-image / grok-imagine-image-quality / grok-imagine-image-edit，或对话模型 grok-4.x / grok-chat-*（走 /v1/images 或 chat/completions）"
+  },
   "video_provider_id": {
-    "description": "默认视频模型提供商",
+    "description": "视频模型提供商",
     "type": "string",
     "_special": "select_provider",
-    "hint": "作为文生视频/图生视频未单独配置时的回退模型。Grok2API 新版请选 grok-imagine-video 系列（走 /v1/videos）"
+    "hint": "用于 /视频（文生视频与图生视频共用）。Grok2API 新版请选 grok-imagine-video 系列（走 /v1/videos）；旧后端可选手动 chat 视频模型"
   },
-  "video_t2v_provider_id": {
-    "description": "文生视频模型提供商",
-    "type": "string",
-    "_special": "select_provider",
-    "hint": "无参考图时使用。Grok2API 新版可选 grok-imagine-video / grok-imagine-video-1.5；旧后端可选手动 chat 视频模型"
-  },
-  "video_i2v_provider_id": {
-    "description": "图生视频模型提供商",
-    "type": "string",
-    "_special": "select_provider",
-    "hint": "有参考图时使用。可选 grok-imagine-video-1.5-preview 等仅图生视频模型；Grok2API 新版要求参考图为公网 URL"
-  },
-  "image_gen_provider_id": {
-    "description": "文生图模型提供商",
-    "type": "string",
-    "_special": "select_provider",
-    "hint": "用于 /画图（无参考图）→ /v1/images/generations（如 grok-imagine-image / grok-imagine-image-quality）"
-  },
-  "image_edit_provider_id": {
-    "description": "图生图模型提供商",
-    "type": "string",
-    "_special": "select_provider",
-    "hint": "用于 /画图（带参考图）→ /v1/images/edits（如 grok-imagine-image-edit / grok-imagine-image；Grok2API 新版要求参考图为公网 URL）"
+  "video_default_duration": {
+    "description": "视频默认时长（秒）",
+    "type": "int",
+    "default": 8,
+    "slider": {"min": 1, "max": 15, "step": 1},
+    "hint": "提示词未指定时长时使用的默认视频时长（1-15 秒）。新版 /v1/videos 链路直接使用；旧 chat 视频链路仅支持 6/10/12/16/20 秒，不支持时回退为后端默认"
   }
 }
