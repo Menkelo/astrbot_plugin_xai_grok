@@ -155,9 +155,13 @@ class ImageService:
 
             original_size = len(image_data)
             is_too_large = original_size > self.max_image_size
+            is_gif = image_data[:6] in (b"GIF87a", b"GIF89a")
 
-            if not crop_for_video and not is_too_large:
+            if not crop_for_video and not is_too_large and not is_gif:
                 return self._format_base64(base64_str)
+
+            if is_gif:
+                logger.info(f"[image.gif] GIF 参考图转静态 JPEG 首帧（{original_size} bytes）")
 
             with io.BytesIO(image_data) as input_buffer:
                 img = PILImage.open(input_buffer)
