@@ -150,13 +150,13 @@ class GrokMediaPlugin(Star):
         ):
             yield res
 
-    @filter.command("画图")
+    @filter.command("grok")
     async def cmd_image_gen(self, event: AstrMessageEvent, *, prompt: str = ""):
         # 从消息组件链取 Plain 文本，避免 @用户 被渲染为 " @昵称(QQ号) " 混入提示词
-        prompt = extract_prompt_from_components(event.message_obj.message, "画图")
+        prompt = extract_prompt_from_components(event.message_obj.message, "grok")
 
         if not (prompt or "").strip():
-            yield event.plain_result("❌ 请输入图片提示词，例如：/画图 一只猫 1:1")
+            yield event.plain_result("❌ 请输入图片提示词，例如：/grok 一只猫 1:1")
             return
 
         images = await self.image_service.extract_images_from_message(

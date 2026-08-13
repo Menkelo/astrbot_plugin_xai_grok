@@ -3,7 +3,7 @@
     "description": "图片模型提供商",
     "type": "string",
     "_special": "select_provider",
-    "hint": "用于 /画图（文生图与图生图共用）。可选 grok-imagine-image / grok-imagine-image-quality / grok-imagine-image-edit，或对话模型 grok-4.x / grok-chat-*（走 /v1/images 或 chat/completions）"
+    "hint": "用于 /grok（文生图与图生图共用）。可选 grok-imagine-image / grok-imagine-image-quality / grok-imagine-image-edit，或对话模型 grok-4.x / grok-chat-*（走 /v1/images 或 chat/completions）"
   },
   "video_provider_id": {
     "description": "视频模型提供商",
