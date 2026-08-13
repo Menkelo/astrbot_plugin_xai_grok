@@ -51,6 +51,51 @@ class TaskService:
             return self.plugin.video_provider_id or ""
         return self.plugin.image_provider_id or ""
 
+    # Grok2API / xAI 官方可用模型候选（按场景归类，仅用于 /v1/models 探测回退）
+    IMAGE_FALLBACK_CANDIDATES = [
+        "grok-imagine-image",
+        "grok-imagine-image-quality",
+        "grok-imagine-image-lite",
+        "grok-imagine-1.0",
+    ]
+    EDIT_FALLBACK_CANDIDATES = [
+        "grok-imagine-image",
+        "grok-imagine-image-edit",
+        "grok-imagine-image-lite",
+        "grok-imagine-1.0-edit",
+    ]
+    VIDEO_FALLBACK_CANDIDATES = [
+        "grok-imagine-video",
+        "grok-imagine-video-1.5-preview",
+        "grok-imagine-1.0-video",
+    ]
+
+    async def _resolve_task_model(self, task_type: str, model: str, base_url: str, api_key: str) -> str:
+        """探测 /v1/models 并在配置模型不可用时回退到同类候选。
+
+        仅对 imagine 系列模型做探测回退；对话类模型生图不受影响。
+        """
+        if not model:
+            return model
+        m = str(model).strip().lower()
+        if "imagine" not in m:
+            return model
+
+        if task_type == "video":
+            candidates = self.VIDEO_FALLBACK_CANDIDATES
+        elif task_type == "edit":
+            candidates = self.EDIT_FALLBACK_CANDIDATES
+        else:
+            candidates = self.IMAGE_FALLBACK_CANDIDATES
+
+        return await self.api_client.resolve_model(
+            configured_model=model,
+            fallback_models=candidates,
+            base_url=base_url,
+            api_key=api_key,
+            scene=f"{task_type}-模型回退",
+        )
+
     @staticmethod
     def _is_chat_image_model(model: str) -> bool:
         """
@@ -354,6 +399,18 @@ class TaskService:
             if perr or not runtime:
                 await self.send_service.reply_error(event, f"❌ {perr}")
                 return
+
+            resolved_model = await self._resolve_task_model(
+                task_type,
+                runtime.model,
+                runtime.base_url,
+                runtime.api_key
+            )
+            if resolved_model and resolved_model != runtime.model:
+                logger.warning(
+                    f"任务路由: 模型回退 {runtime.model} → {resolved_model}（task_type={task_type}）"
+                )
+                runtime.model = resolved_model
 
             resp = None
             urls = None

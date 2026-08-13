@@ -208,6 +208,15 @@
 | 图生图 | `grok-imagine-image-edit`、`grok-imagine-image`、`grok-imagine-image-quality` | `/v1/images/edits`（JSON，参考图 `image.url`） |
 | 对话生图 | `grok-4.3`、`grok-4.5`、`grok-4.20-0309-reasoning`、`grok-4.20-multi-agent-0309`、`grok-chat-fast/auto/expert/heavy`、`grok-build-0.1`、`grok-composer-2.5-fast` | `/v1/chat/completions` |
 
+### 自动模型探测与回退
+
+调用 `/v1/images/generations`、`/v1/images/edits`、`/v1/videos/generations` 前，插件会探测 `GET /v1/models` 获取后端当前可用模型列表（短时缓存 5 分钟）：
+
+- 配置的 imagine 系列模型不可用（如后端未启用、名称不一致）时，自动回退到同类候选模型
+- 回退按候选顺序依次尝试：图片 `grok-imagine-image*` 系列、图生图 `grok-imagine-image-edit` 系列、视频 `grok-imagine-video*` 系列
+- 探测失败（接口不存在 / 网络异常）或候选全部不可用时不改写模型，沿用配置原值
+- 探测到的模型列表会记录在日志中，便于排查「模型不存在(404)」
+
 ---
 
 ## 技术实现摘要

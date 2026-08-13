@@ -1,20 +1,105 @@
 import asyncio
 import json
-from typing import Optional, Tuple
+import time
+from typing import List, Optional, Set, Tuple
 
 import httpx
 from astrbot.api import logger
 
 
 class ApiClient:
+    MODEL_CACHE_TTL_SECONDS = 300
+    MODEL_PROBE_TIMEOUT = 15
+
     def __init__(self, http_client: httpx.AsyncClient, timeout_seconds=180, max_retry_attempts=3):
         self.http_client = http_client
         self.timeout_seconds = timeout_seconds
         self.max_retry_attempts = max_retry_attempts
+        self._models_cache: Optional[Set[str]] = None
+        self._models_cache_ts = 0.0
+        self._models_cache_lock = asyncio.Lock()
 
     @staticmethod
     def endpoint(base_v1: str, path_after_v1: str) -> str:
         return f"{base_v1.rstrip('/')}/{path_after_v1.lstrip('/')}"
+
+    async def fetch_available_models(self, base_url: str, api_key: str) -> Optional[Set[str]]:
+        """探测当前后端可用模型列表（GET /v1/models），带短时缓存。
+
+        探测失败（接口不存在 / 网络异常）返回 None，由调用方决定保持原模型。
+        """
+        now = time.time()
+        if self._models_cache is not None and now - self._models_cache_ts < self.MODEL_CACHE_TTL_SECONDS:
+            return self._models_cache
+
+        url = self.endpoint(base_url, "models")
+        headers = {"Authorization": f"Bearer {api_key}"}
+        timeout = httpx.Timeout(connect=20.0, read=self.MODEL_PROBE_TIMEOUT, write=15.0, pool=15.0)
+
+        async with self._models_cache_lock:
+            if self._models_cache is not None and now - self._models_cache_ts < self.MODEL_CACHE_TTL_SECONDS:
+                return self._models_cache
+            try:
+                r = await self.http_client.get(url, headers=headers, timeout=timeout)
+                if r.status_code != 200:
+                    logger.warning(f"[model.probe] GET /v1/models → HTTP {r.status_code}: {r.text[:200]}")
+                    return None
+                data = r.json()
+            except Exception as e:
+                logger.warning(f"[model.probe] GET /v1/models 失败: {e}")
+                return None
+
+            model_ids: Set[str] = set()
+            for item in data.get("data", []) if isinstance(data, dict) else []:
+                if isinstance(item, dict):
+                    mid = str(item.get("id", "")).strip()
+                    if mid:
+                        model_ids.add(mid)
+            if not model_ids:
+                logger.warning("[model.probe] /v1/models 未返回任何模型")
+                return None
+
+            self._models_cache = model_ids
+            self._models_cache_ts = time.time()
+            logger.info(f"[model.probe] 可用模型 {len(model_ids)} 个: {sorted(model_ids)}")
+            return model_ids
+
+    async def resolve_model(
+        self,
+        configured_model: str,
+        fallback_models: List[str],
+        base_url: str,
+        api_key: str,
+        scene: str,
+    ) -> str:
+        """根据 /v1/models 探测结果自动选择可用模型，配置模型不可用时按候选回退。
+
+        探测失败或候选全部不可用时不改写，返回配置模型原值。
+        """
+        preferred = str(configured_model or "").strip()
+        if not preferred and fallback_models:
+            preferred = fallback_models[0]
+
+        candidates: List[str] = []
+        for name in [preferred, *fallback_models]:
+            name = str(name or "").strip()
+            if name and name not in candidates:
+                candidates.append(name)
+        if not candidates:
+            return preferred
+
+        available = await self.fetch_available_models(base_url, api_key)
+        if not available:
+            return preferred
+
+        for candidate in candidates:
+            if candidate in available:
+                if candidate != candidates[0]:
+                    logger.warning(f"[model.resolve] [{scene}] 配置模型 {candidates[0]} 不可用，自动回退为: {candidate}")
+                return candidate
+
+        logger.warning(f"[model.resolve] [{scene}] 候选均不可用，继续使用: {candidates[0]}")
+        return candidates[0]
 
     async def call_chat(
         self,
