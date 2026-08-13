@@ -111,9 +111,11 @@ class GrokMediaPlugin(Star):
             target_index=0,
             target_aspect_ratio=target_aspect_ratio
         )
-        image_base64 = images[0] if images else None
+        image_ref = images[0] if images else None
+        image_base64 = (image_ref or {}).get("b64")
+        image_url = (image_ref or {}).get("url")
 
-        if image_base64:
+        if image_base64 or image_url:
             logger.info("[视频] 检测到参考图，走图生视频")
         else:
             logger.info("[视频] 未检测到参考图，走文生视频")
@@ -125,6 +127,7 @@ class GrokMediaPlugin(Star):
             prompt=prompt,
             task_type="video",
             image_base64=image_base64,
+            image_url=image_url,
             show_status=True
         ):
             yield res
@@ -140,13 +143,18 @@ class GrokMediaPlugin(Star):
         images = await self.image_service.extract_images_from_message(
             event, crop_for_video=False, target_index=0
         )
-        if images:
-            # 图生图 -> /v1/images/edits
+        image_ref = images[0] if images else None
+        image_base64 = (image_ref or {}).get("b64")
+        image_url = (image_ref or {}).get("url")
+
+        if image_base64 or image_url:
+            # 图生图 -> /v1/images/edits 或 chat/completions
             async for res in self.orchestrator.start_once(
                 event=event,
                 prompt=prompt,
                 task_type="edit",
-                image_base64=images[0],
+                image_base64=image_base64,
+                image_url=image_url,
                 show_status=True
             ):
                 yield res

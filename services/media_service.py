@@ -129,7 +129,13 @@ class MediaService:
 
         return (urls, None) if urls else (None, "响应中未找到可用资源链接")
 
-    async def download_file(self, url: str, base_url: str, api_key: str) -> Tuple[Optional[str], Optional[str]]:
+    async def download_file(
+        self,
+        url: str,
+        base_url: str,
+        api_key: str,
+        force_auth: bool = False
+    ) -> Tuple[Optional[str], Optional[str]]:
         try:
             # 支持 data URL
             if isinstance(url, str) and url.startswith("data:"):
@@ -176,7 +182,7 @@ class MediaService:
             except Exception:
                 pass
 
-            if is_self_hosted:
+            if force_auth or is_self_hosted:
                 headers["Authorization"] = f"Bearer {api_key}"
                 headers["Referer"] = base_url
             elif "grok.com" in parsed.netloc and api_key and len(api_key) > 50:

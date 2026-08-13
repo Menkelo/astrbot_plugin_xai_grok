@@ -49,6 +49,7 @@ class OrchestratorService:
         prompt: str,
         task_type: str,
         image_base64: Optional[str] = None,
+        image_url: Optional[str] = None,
         show_status: bool = True
     ) -> AsyncGenerator:
         prompt = (prompt or "").replace("用户：", "").replace("User:", "").strip()
@@ -103,6 +104,7 @@ class OrchestratorService:
                 event=event,
                 prompt=final_prompt,
                 image_base64=image_base64,
+                image_url=image_url,
                 task_id=task_id,
                 task_type=task_type
             )

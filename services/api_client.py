@@ -1,7 +1,5 @@
 import asyncio
 import json
-import base64
-import re
 from typing import Optional, Tuple
 
 import httpx
@@ -17,34 +15,6 @@ class ApiClient:
     @staticmethod
     def endpoint(base_v1: str, path_after_v1: str) -> str:
         return f"{base_v1.rstrip('/')}/{path_after_v1.lstrip('/')}"
-
-    @staticmethod
-    def _decode_data_url(image_base64: str) -> tuple[Optional[bytes], str]:
-        if not image_base64:
-            return None, "image/jpeg"
-
-        s = str(image_base64).strip()
-        mime = "image/jpeg"
-
-        try:
-            if s.startswith("data:"):
-                m = re.match(r"^data:([^;]+);base64,(.*)$", s, re.I | re.S)
-                if not m:
-                    return None, mime
-                mime = m.group(1).lower().strip()
-                data = m.group(2).strip()
-            else:
-                data = s
-
-            try:
-                raw = base64.b64decode(data)
-            except Exception:
-                data = re.sub(r"[^a-zA-Z0-9+/=]", "", data)
-                raw = base64.b64decode(data)
-
-            return raw, mime
-        except Exception:
-            return None, mime
 
     async def call_chat(
         self,
@@ -171,6 +141,7 @@ class ApiClient:
         video_size: Optional[str] = None,
         resolution: Optional[str] = None
     ) -> Tuple[Optional[dict], Optional[str]]:
+        """旧后端 chat/completions 视频链路（保留作兜底）"""
         return await self.call_chat(
             prompt=prompt,
             image_base64=image_base64,
@@ -182,6 +153,189 @@ class ApiClient:
             video_size=video_size,
             resolution=resolution
         )
+
+    async def submit_video_job(
+        self,
+        prompt: str,
+        model: str,
+        base_url: str,
+        api_key: str,
+        image_url: Optional[str] = None,
+        aspect_ratio: Optional[str] = None,
+        resolution: Optional[str] = None,
+        duration_seconds: Optional[int] = None
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Grok2API 新版视频任务：POST /v1/videos/generations
+        返回 (request_id, err)。
+        """
+        url = self.endpoint(base_url, "videos/generations")
+
+        payload = {
+            "model": model,
+            "prompt": prompt,
+        }
+        if image_url:
+            payload["image"] = {"url": image_url}
+        if aspect_ratio:
+            payload["aspect_ratio"] = aspect_ratio
+        if resolution:
+            payload["resolution"] = resolution
+        if duration_seconds:
+            payload["duration"] = int(duration_seconds)
+
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+        timeout = httpx.Timeout(connect=20.0, read=60.0, write=60.0, pool=60.0)
+        last_error = "未知错误"
+
+        for i in range(self.max_retry_attempts):
+            try:
+                logger.info(
+                    f"提交视频任务 (模型: {model}, image_url={'有' if image_url else '无'}, "
+                    f"aspect_ratio={aspect_ratio or 'default'}, resolution={resolution or 'default'}, "
+                    f"duration={duration_seconds or 'default'}, 尝试 {i + 1})"
+                )
+                r = await self.http_client.post(url, json=payload, headers=headers, timeout=timeout)
+
+                if r.status_code == 200:
+                    try:
+                        data = r.json()
+                    except json.JSONDecodeError:
+                        last_error = "JSON解析失败"
+                        continue
+                    request_id = (data or {}).get("request_id") or (data or {}).get("id")
+                    if request_id:
+                        return str(request_id), None
+                    last_error = f"视频任务响应缺少 request_id: {str(data)[:200]}"
+                    continue
+
+                if r.status_code == 404:
+                    return None, "后端不支持 /v1/videos/generations，请升级 Grok2API 或更换视频模型"
+
+                if r.status_code == 429:
+                    last_error = "触发限流 (429)，正在重试..."
+                    await asyncio.sleep(2)
+                    continue
+
+                try:
+                    err = r.json()
+                    emsg = err.get("error", {}).get("message") or err.get("error")
+                    last_error = f"API错误({r.status_code}): {emsg}"
+                except Exception:
+                    last_error = f"API请求失败({r.status_code})"
+
+            except Exception as e:
+                last_error = f"请求异常: {e}"
+
+        return None, last_error
+
+    async def poll_video_job(
+        self,
+        request_id: str,
+        model: str,
+        base_url: str,
+        api_key: str,
+        poll_interval: float = 5.0,
+        max_wait_seconds: float = 300.0
+    ) -> Tuple[Optional[dict], Optional[str]]:
+        """
+        轮询视频任务：GET /v1/videos/{request_id}
+        返回 (job_result, err)。job_result 含 status=pending/done/failed。
+        done 时含 video.url 可直接下载。
+        """
+        url = self.endpoint(base_url, f"videos/{request_id}")
+        headers = {"Authorization": f"Bearer {api_key}"}
+        timeout = httpx.Timeout(connect=20.0, read=60.0, write=60.0, pool=60.0)
+        last_error = "未知错误"
+
+        waited = 0.0
+        while waited < max_wait_seconds:
+            try:
+                r = await self.http_client.get(url, headers=headers, timeout=timeout)
+
+                if r.status_code == 200:
+                    try:
+                        job = r.json()
+                    except json.JSONDecodeError:
+                        last_error = "视频任务响应JSON解析失败"
+                        await asyncio.sleep(poll_interval)
+                        waited += poll_interval
+                        continue
+
+                    status = str((job or {}).get("status", "")).lower()
+                    if status == "done":
+                        return job, None
+                    if status == "failed":
+                        err_body = (job or {}).get("error", {}) or {}
+                        message = err_body.get("message") if isinstance(err_body, dict) else err_body
+                        return None, f"视频生成失败: {message or '未知错误'}"
+
+                    progress = (job or {}).get("progress")
+                    logger.info(
+                        f"[video.job] request_id={request_id}, status={status}, "
+                        f"progress={progress}, waited={waited:.0f}s/{max_wait_seconds:.0f}s"
+                    )
+
+                elif r.status_code == 404:
+                    return None, f"视频任务不存在或已过期: {request_id}"
+                elif r.status_code == 429:
+                    logger.warning("[video.job] 轮询触发限流(429)，稍后继续...")
+                else:
+                    try:
+                        err = r.json()
+                        emsg = err.get("error", {}).get("message") or err.get("error")
+                        last_error = f"API错误({r.status_code}): {emsg}"
+                    except Exception:
+                        last_error = f"API请求失败({r.status_code})"
+
+            except Exception as e:
+                last_error = f"请求异常: {e}"
+
+            await asyncio.sleep(poll_interval)
+            waited += poll_interval
+
+        return None, f"视频生成超时（已等待 {max_wait_seconds:.0f}s），请稍后查询。request_id={request_id}"
+
+    async def call_video_job(
+        self,
+        prompt: str,
+        model: str,
+        base_url: str,
+        api_key: str,
+        image_url: Optional[str] = None,
+        aspect_ratio: Optional[str] = None,
+        resolution: Optional[str] = None,
+        duration_seconds: Optional[int] = None,
+        poll_interval: float = 5.0,
+        max_wait_seconds: float = 300.0
+    ) -> Tuple[Optional[dict], Optional[str]]:
+        """提交视频任务并轮询直至完成，返回 (done_job, err)"""
+        request_id, err = await self.submit_video_job(
+            prompt=prompt,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            image_url=image_url,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            duration_seconds=duration_seconds
+        )
+        if err:
+            return None, err
+
+        logger.info(f"视频任务已提交: request_id={request_id}, model={model}")
+        job, perr = await self.poll_video_job(
+            request_id=request_id,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            poll_interval=poll_interval,
+            max_wait_seconds=max_wait_seconds
+        )
+        if perr:
+            return None, perr
+        job["request_id"] = request_id
+        return job, None
 
     async def call_generation(
         self,
@@ -238,44 +392,37 @@ class ApiClient:
     async def call_image_edit(
         self,
         prompt: str,
-        image_base64: str,
+        image_url: str,
         model: str,
         base_url: str,
         api_key: str
     ) -> Tuple[Optional[dict], Optional[str]]:
+        """
+        Grok2API 新版 /v1/images/edits 为 JSON 接口，参考图通过 image.url 传递。
+        url 可以是公网 http(s) 地址，也可传 data URL（兼容 xAI 官方，Grok2API 会拒绝非 http(s)）。
+        """
         url = self.endpoint(base_url, "images/edits")
-        headers = {"Authorization": f"Bearer {api_key}"}
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
         timeout = httpx.Timeout(connect=20.0, read=self.timeout_seconds, write=60.0, pool=60.0)
         last_error = "未知错误"
 
-        raw, mime = self._decode_data_url(image_base64)
-        if not raw:
-            return None, "参考图无效：无法解析为图片数据"
+        if not image_url:
+            return None, "参考图无效：缺少 image url"
 
-        ext_map = {
-            "image/jpeg": "jpg",
-            "image/png": "png",
-            "image/gif": "gif",
-            "image/webp": "webp"
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "n": 1,
+            "image": {"url": image_url},
         }
-        ext = ext_map.get(mime, "jpg")
-        filename = f"input.{ext}"
 
         for i in range(self.max_retry_attempts):
             try:
                 logger.info(f"调用 Image Edit API (模型: {model}, size: follow-source, 尝试 {i + 1})")
 
-                data = {
-                    "model": model,
-                    "prompt": prompt,
-                    "n": "1"
-                }
-                files = {"image": (filename, raw, mime)}
-
                 r = await self.http_client.post(
                     url,
-                    data=data,
-                    files=files,
+                    json=payload,
                     headers=headers,
                     timeout=timeout
                 )
@@ -286,6 +433,9 @@ class ApiClient:
                     except json.JSONDecodeError:
                         last_error = "JSON解析失败"
                         continue
+
+                if r.status_code == 404:
+                    return None, "后端不支持 /v1/images/edits JSON 接口，请升级 Grok2API"
 
                 if r.status_code == 429:
                     last_error = "触发限流 (429)，正在重试..."

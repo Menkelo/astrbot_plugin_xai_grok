@@ -212,7 +212,10 @@ class ImageService:
         candidates: List[Tuple[str, Any]],
         crop_for_video: bool,
         target_aspect_ratio: Optional[float] = None
-    ) -> List[str]:
+    ) -> List[dict]:
+        """
+        返回: List[{"b64": <data_url or None>, "url": <原始 http url or None>}]
+        """
         if not candidates:
             return []
         loop = asyncio.get_running_loop()
@@ -220,10 +223,12 @@ class ImageService:
         async def resolve_one(cand):
             try:
                 kind, data = cand
-                if kind == "b64":
-                    b64 = await data if asyncio.iscoroutine(data) else data
-                else:
+                raw_url = None
+                if kind == "url":
+                    raw_url = data
                     b64 = await self._fetch_url_base64(data)
+                else:
+                    b64 = await data if asyncio.iscoroutine(data) else data
 
                 if not b64:
                     return None
@@ -233,12 +238,13 @@ class ImageService:
                     crop_for_video,
                     target_aspect_ratio
                 )
-                return await loop.run_in_executor(None, fn)
+                processed = await loop.run_in_executor(None, fn)
+                return {"b64": processed, "url": raw_url}
             except Exception:
                 return None
 
         results = await asyncio.gather(*(resolve_one(c) for c in candidates), return_exceptions=True)
-        return [r for r in results if isinstance(r, str)]
+        return [r for r in results if isinstance(r, dict)]
 
     async def extract_images_from_message(
         self,
@@ -246,7 +252,10 @@ class ImageService:
         crop_for_video=False,
         target_index=-1,
         target_aspect_ratio: Optional[float] = None
-    ) -> List[str]:
+    ) -> List[dict]:
+        """
+        返回: List[{"b64": <data_url or None>, "url": <原始 http url or None>}]
+        """
         if not hasattr(event, "message_obj") or not event.message_obj:
             return []
 

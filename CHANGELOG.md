@@ -1,3 +1,27 @@
+# [v1.1.12] - 兼容 Grok2API 新版模型与接口
+
+* **🎬 视频链路切换（重要）**
+  * `grok-imagine-video*` 系列改走 Grok2API 新版 `/v1/videos/generations` 异步任务接口
+  * 提交任务 → 轮询 `/v1/videos/{request_id}` → 下载 `/v1/videos/{request_id}/content`
+  * 视频 content 下载自动携带鉴权（Authorization）
+  * 时长按 `1-15s` 校验并透传 `duration`，比例透传 `aspect_ratio`，分辨率透传 `resolution`（480p/720p/1080p）
+  * 旧后端（手动配置的 chat 视频模型）保留 `/v1/chat/completions` 兜底链路
+
+* **🖼️ 图片链路更新**
+  * `/v1/images/edits` 改用 Grok2API 新版 JSON 接口，参考图通过 `image.url` 传递
+  * 参考图保留原始 URL（引用消息图片 / `@用户`头像），Grok2API 仅接受公网 http(s) 地址
+  * 仅有 base64 的本地图片会以 data URL 传递（xAI 官方可用，Grok2API 会拒绝并提示）
+
+* **🧭 模型路由扩展（按 Grok2API 最新模型目录）**
+  * 新增对话模型生图路由：`grok-4.3` / `grok-4.5` / `grok-4.20-0309-*` / `grok-4.20-multi-agent-0309` / `grok-chat-fast|auto|expert|heavy` / `grok-build-0.1` / `grok-composer-2.5-fast`
+  * 新增图片模型路由：`grok-imagine-image` / `grok-imagine-image-quality` / `grok-imagine-image-lite` / `grok-imagine-image-quality-lite` / `grok-imagine-image-edit`
+  * 新增视频模型路由：`grok-imagine-video` / `grok-imagine-video-1.5` / `grok-imagine-video-1.5-preview`
+
+* **📄 文档同步**
+  * 更新 `README.md` 与 `_conf_schema.json` 的模型与接口说明
+
+---
+
 # [v1.1.11] - 修复图生视频跨比例参考图被压扁
 
 * **图生视频**

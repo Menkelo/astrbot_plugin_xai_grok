@@ -11,11 +11,14 @@
 - 🎨 **图像生成**：支持文生图 / 图生图
 - 🧭 **图片链路按模型自动路由**
   - 文生图：
-    - `grok-imagine*` → `/v1/images/generations`
-    - `grok-4.1*` → `/v1/chat/completions`
+    - `grok-imagine-image*`（含 `grok-imagine-1.0*`）→ `/v1/images/generations`
+    - 对话模型（`grok-4.x` / `grok-4.20-*` / `grok-chat-*` / `grok-build-*` / `grok-composer-*`）→ `/v1/chat/completions`
   - 图生图：
-    - `grok-imagine*` → `/v1/images/edits`
-    - `grok-4.1*` → `/v1/chat/completions`（携带参考图）
+    - `grok-imagine-image*` → `/v1/images/edits`（JSON 接口，参考图走 `image.url`）
+    - 对话模型 → `/v1/chat/completions`（携带参考图）
+- 🎬 **视频链路按模型自动路由**
+  - `grok-imagine-video*` → Grok2API 新版 `/v1/videos/generations` 异步任务（提交 → 轮询 → 下载）
+  - 其他手动配置的 chat 视频模型 → 旧 `/v1/chat/completions` 兜底链路
 - 🧠 **预设联动**：可对接全局预设 [astrbot_plugin_preset_hub](https://github.com/Menkelo/astrbot_plugin_preset_hub)
 - 🖼️ **智能取图**
   - 当前消息图片
@@ -47,13 +50,17 @@
 - 无参考图：走文生视频
 - 视频可在提示词中写比例，例如 `1:1`、`16:9`、`9:16`（文生视频 / 图生视频都支持）
 - 视频也支持直接写尺寸：`1024x1024`、`1024x1792`、`1280x720`、`1792x1024`、`720x1280`
-- 插件通过 `chat/completions` 透传 `aspect_ratio` 与 `video_config.size`
-- 可写 `480p`、`720p`、`1080p` 透传 `video_config.resolution`
+- 可写 `480p`、`720p`、`1080p` 透传 `resolution`
 - 图生视频指定与原图不同的比例时，参考图会先做等比画布适配，避免被后端拉伸
-- 使用 `grok-imagine-video-1.5*` / `grok-imagine-video-1.5-preview` 时，插件会按 `1-15s` 校验并透传时长；最终是否生效取决于后端的 `chat/completions` 视频链路
+- `grok-imagine-video*` 系列走 Grok2API 新版 `/v1/videos/generations` 异步任务链路
+  - 支持 `1-15s` 时长（透传 `duration`，默认由后端决定）
+  - 支持比例透传 `aspect_ratio`（`1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3`）
+  - 图生视频参考图通过 `image.url` 传递，**要求公网 URL**；本地文件图片（仅有 base64）需配置对话类视频模型走 chat 链路
+  - 完成后自动轮询任务并下载成片（视频 content 需携带鉴权，插件已处理）
 - `grok-imagine-video-1.5-preview` 仅用于图生视频；无参考图时请配置文生视频槽位为 `grok-imagine-video` 或当前后端支持的 chat 视频模型
-- 当前兼容策略不调用 `/v1/videos`；`grok-imagine-video` 也走 `/v1/chat/completions`
-- 使用旧 Grok2API 视频链路时，时长支持 `6/10/12/16/20`；`15s` 会按最接近的 `16s` 兼容
+- 使用旧 Grok2API（Python 版）或手动配置的 chat 视频模型时，走 `/v1/chat/completions` 兜底链路
+  - 时长支持 `6/10/12/16/20` 秒；`15s` 会按最接近的 `16s` 兼容
+  - 透传 `aspect_ratio` 与 `video_config.size`
 
 示例：
 
@@ -72,11 +79,11 @@
 说明：
 
 - 无参考图：文生图
-  - 若模型为 `grok-imagine*`：走 `/v1/images/generations`（支持比例/尺寸映射）
-  - 若模型为 `grok-4.1*`：走 `/v1/chat/completions`（不使用 `size` 字段）
+  - 若模型为 `grok-imagine-image*`（含 `grok-imagine-1.0*`）：走 `/v1/images/generations`（支持比例/尺寸映射）
+  - 若模型为对话模型（`grok-4.x` / `grok-4.20-*` / `grok-chat-*` 等）：走 `/v1/chat/completions`（不使用 `size` 字段）
 - 有参考图：图生图
-  - 若模型为 `grok-imagine*`：走 `/v1/images/edits`
-  - 若模型为 `grok-4.1*`：走 `/v1/chat/completions`（携带参考图）
+  - 若模型为 `grok-imagine-image*`：走 `/v1/images/edits`（JSON 接口，参考图走 `image.url`）
+  - 若模型为对话模型：走 `/v1/chat/completions`（携带参考图）
 
 示例：
 
@@ -89,7 +96,7 @@
 
 ## 比例与尺寸规则
 
-### 文生图（`grok-imagine*` → `/v1/images/generations`）
+### 文生图（`grok-imagine-image*` → `/v1/images/generations`）
 
 支持比例映射：
 
@@ -107,18 +114,19 @@
 
 - 未指定时默认 `1024x1792`（2:3 近似竖图）
 
-### 文生图（`grok-4.1*` → `/v1/chat/completions`）
+### 文生图（对话模型 → `/v1/chat/completions`）
 
 - 走对话接口返回媒体资源
 - 不使用 `size` 参数
 - 提示词中的比例/尺寸词会原样进入提示词，最终效果取决于后端模型实现
 
-### 图生图（`grok-imagine*` → `/v1/images/edits`）
+### 图生图（`grok-imagine-image*` → `/v1/images/edits`）
 
-- 使用 edit 接口
+- 使用 edit 接口（新版为 JSON 接口，参考图走 `image.url`）
 - 按图生图链路处理（参考图 + 文本）
+- 参考图为公网 URL 时直接透传；仅有 base64 时会以 data URL 形式传递（Grok2API 会拒绝非 http(s) 地址，xAI 官方可用）
 
-### 图生图（`grok-4.1*` → `/v1/chat/completions`）
+### 图生图（对话模型 → `/v1/chat/completions`）
 
 - 使用 chat 接口并携带参考图
 - 插件会清理提示词中的比例/尺寸标记，避免误导改图尺寸
@@ -192,22 +200,33 @@
 
 - https://github.com/chenyme/grok2api
 
+### Grok2API 新版模型对照
+
+| 类别 | 模型（举例） | 插件路由 |
+| :-- | :-- | :-- |
+| 视频 | `grok-imagine-video`、`grok-imagine-video-1.5`、`grok-imagine-video-1.5-preview` | `/v1/videos/generations` 异步任务 |
+| 文生图 | `grok-imagine-image`、`grok-imagine-image-quality`、`grok-imagine-image-lite`、`grok-imagine-image-quality-lite` | `/v1/images/generations` |
+| 图生图 | `grok-imagine-image-edit`、`grok-imagine-image`、`grok-imagine-image-quality` | `/v1/images/edits`（JSON，参考图 `image.url`） |
+| 对话生图 | `grok-4.3`、`grok-4.5`、`grok-4.20-0309-reasoning`、`grok-4.20-multi-agent-0309`、`grok-chat-fast/auto/expert/heavy`、`grok-build-0.1`、`grok-composer-2.5-fast` | `/v1/chat/completions` |
+
 ---
 
 ## 技术实现摘要
 
 - Chat 接口：`/v1/chat/completions`
   - 用于旧视频生成链路（文生/图生，支持比例到 `video_config.size` 的映射与时长透传）
-  - 用于文生图（当模型是 `grok-4.1*`）
-  - 用于图生图（当模型是 `grok-4.1*`）
-- 视频生成接口：`/v1/chat/completions`
-  - 用于视频生成（文生/图生）
-  - 透传 `seconds / duration / duration_seconds / video_config.seconds / video_config.duration`
-  - 透传 `size / aspect_ratio / video_config.aspect_ratio / video_config.size / video_config.resolution`
+  - 用于文生图（当模型是对话模型）
+  - 用于图生图（当模型是对话模型）
+- 视频任务接口：`/v1/videos/generations`（Grok2API 新版）
+  - 用于 `grok-imagine-video*` 系列视频生成（文生/图生）
+  - POST 提交任务 → 轮询 `/v1/videos/{request_id}` → 下载 `/v1/videos/{request_id}/content`
+  - 透传 `duration`（1-15s）、`aspect_ratio`、`resolution`（480p/720p/1080p）
+  - 图生视频参考图通过 `image.url` 传递
 - Image Generation 接口：`/v1/images/generations`
-  - 用于文生图（当模型是 `grok-imagine*`）
+  - 用于文生图（当模型是 `grok-imagine-image*`）
 - Image Edit 接口：`/v1/images/edits`
-  - 用于图生图（当模型是 `grok-imagine*`）
+  - 用于图生图（当模型是 `grok-imagine-image*`）
+  - 新版为 JSON 接口，参考图走 `image.url`
 - 自动重试：
   - 针对 429 / 部分 5xx 做有限重试
 - 发送失败兜底：
@@ -230,16 +249,21 @@ A：请在 provider 中补全密钥字段（`key/api_key/token`）。
 A：已修复。当前版本支持空格与换行后的完整内容，并兼容比例紧贴写法（如 `1:1`）。
 
 ### Q4：视频比例不生效怎么办？
-A：旧 Grok2API 视频链路看日志是否出现 `video_size=1024x1024`、`1280x720` 或 `720x1280`。  
-同时看日志是否出现 `aspect_ratio=16:9` 这类参数；插件会把支持尺寸自动映射为比例，并通过 `chat/completions` 透传。
+A：分链路排查。  
+- `grok-imagine-video*`（新版 `/v1/videos` 链路）：看日志是否出现 `aspect_ratio=16:9`、`resolution=720p`、`duration=N` 等参数，任务通过 `/v1/videos/generations` 提交。  
+- 旧 chat 链路：看日志是否出现 `video_size=1024x1024`、`1280x720` 或 `720x1280`；插件会把支持尺寸自动映射为比例，并通过 `chat/completions` 透传。
 
 ### Q5：图生图为什么不按 `1:1` 生成？
 A：图生图链路会清理比例/尺寸标记，不将其作为强制改尺寸参数使用；最终表现取决于模型与后端实现。
 
 ### Q6：为什么同样是 `/画图`，有时走 generation/edits，有时走 chat？
 A：插件会按模型名自动路由：  
-- `grok-imagine*`：文生图走 `generations`，图生图走 `edits`  
-- `grok-4.1*`：文生图/图生图都走 `chat/completions`
+- `grok-imagine-image*`：文生图走 `generations`，图生图走 `edits`（JSON 接口）  
+- 对话模型（`grok-4.x` / `grok-4.20-*` / `grok-chat-*` / `grok-build-*` / `grok-composer-*`）：文生图/图生图都走 `chat/completions`
+
+### Q7：图生图/图生视频提示参考图需要公网 URL？
+A：Grok2API 新版 `/v1/images/edits` 与 `/v1/videos/generations` 的参考图只接受公网 http(s) 地址（带 SSRF 防护，拒绝 data URL）。  
+引用消息中的图片 URL、`@用户`头像会自动透传；若参考图来自本地文件（仅有 base64），请改用对话类模型走 `chat/completions` 链路完成图生图/图生视频。
 
 ---
 
