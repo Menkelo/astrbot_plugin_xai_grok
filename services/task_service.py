@@ -71,6 +71,12 @@ class TaskService:
             return "console"
         return route
 
+    def _image_resolution(self, task_type: str) -> str:
+        """图片生成/编辑分辨率：Web 渠道锁定 1k（官方 Grok Web 图片接口仅支持 1k），其余渠道 2k。"""
+        if self._plugin_media_route(task_type) == "web":
+            return "1k"
+        return "2k"
+
     async def _resolve_task_model(self, task_type: str, model: str, base_url: str, api_key: str) -> str:
         """按配置渠道为 imagine 媒体模型补/替换前缀（Console/Web/Build）。
 
@@ -503,9 +509,11 @@ class TaskService:
                     if not gen_size:
                         gen_size = "1024x1792"
 
+                    image_resolution = self._image_resolution("image")
+
                     logger.info(
                         f"任务路由: task_type=image, api=images/generations, "
-                        f"model={runtime.model}, size={gen_size}, resolution=2k"
+                        f"model={runtime.model}, size={gen_size}, resolution={image_resolution}"
                     )
 
                     resp, error = await self.api_client.call_generation(
@@ -514,7 +522,7 @@ class TaskService:
                         base_url=runtime.base_url,
                         api_key=runtime.api_key,
                         size=gen_size,
-                        resolution="2k"
+                        resolution=image_resolution
                     )
                     if error:
                         await self.send_service.reply_error(event, f"❌ {error}")
@@ -561,9 +569,10 @@ class TaskService:
                 else:
                     # grok-imagine-image 系列走 images/edits（JSON 接口，image.url）
                     ref_url = image_url or image_base64
+                    edit_resolution = self._image_resolution("edit")
                     logger.info(
                         f"任务路由: task_type=edit, api=images/edits, "
-                        f"model={runtime.model}, size=follow-source, resolution=2k, "
+                        f"model={runtime.model}, size=follow-source, resolution={edit_resolution}, "
                         f"ref={'url' if image_url else 'data-url'}"
                     )
 
@@ -573,7 +582,7 @@ class TaskService:
                         model=runtime.model,
                         base_url=runtime.base_url,
                         api_key=runtime.api_key,
-                        resolution="2k"
+                        resolution=edit_resolution
                     )
                     if error:
                         await self.send_service.reply_error(event, f"❌ {error}")

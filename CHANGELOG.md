@@ -1,3 +1,11 @@
+# [v1.1.22] - Web 渠道图片分辨率锁定 1k
+
+* **🖼️ Web 渠道图片生成/编辑锁定 resolution=1k**
+  * Grok Web 图片接口仅支持 1k，固定传 2k 会返回 400（`Grok Web 图片编辑当前仅支持 resolution=1k`）
+  * `image_media_route=Web` 时，文生图与图生图自动透传 `resolution: 1k`；其他渠道保持 2k
+
+---
+
 # [v1.1.21] - 媒体生成渠道可配置
 
 * **🧭 配置面板新增媒体渠道切换（临时应急用）**
