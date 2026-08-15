@@ -224,9 +224,9 @@ class TaskService:
     @staticmethod
     def _placeholder_failure_message() -> str:
         return (
-            "❌ 当前对话模型只返回了图片占位符（未实际生成媒体）。\n"
-            "通用对话模型（如 grok-4.x）生图依赖工具调用，当前链路未启用。\n"
-            "建议改用 grok-composer-* 等支持直接出图的对话生图模型。"
+            "❌ 当前对话模型未实际生成媒体（仅返回占位符/追问文本）。\n"
+            "通用对话模型（如 grok-4.x）在后端没有绑定生图工具，无法出图。\n"
+            "请在 image_edit_chat_fallback_model 配置 grok-composer-* 系列生图模型。"
         )
 
     @staticmethod

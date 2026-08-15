@@ -38,17 +38,15 @@ class ApiClient:
         if allow_tools:
             if image_base64:
                 strict_prompt = (
-                    "A reference image is attached. Use the image generation/editing tool "
-                    "to apply the requested edit to the reference image IMMEDIATELY. "
-                    "Do NOT ask questions, do NOT ask for confirmation, do NOT explain or describe. "
-                    "Return only the final generated media.\n\n"
+                    "An image is attached as reference. Please use the media generation tool "
+                    "to apply the requested edit to the reference image and return the final "
+                    "generated media output.\n\n"
                     f"{prompt}"
                 )
             else:
                 strict_prompt = (
-                    "Use the image generation tool to generate the requested image IMMEDIATELY. "
-                    "Do NOT ask questions, do NOT ask for confirmation, do NOT explain or describe. "
-                    "Return only the final generated media.\n\n"
+                    "Please use the media generation tool to generate the requested image "
+                    "and return the final generated media output.\n\n"
                     f"{prompt}"
                 )
         else:
