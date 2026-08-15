@@ -195,6 +195,41 @@ class TaskService:
             return False
 
     @staticmethod
+    def _is_markdown_placeholder_response(resp: dict) -> bool:
+        """检测对话模型只返回了无 URL 的 markdown 图片占位符（未实际生成媒体）。
+
+        典型：content 为 `![描述]` 或 `![描述]()`，但缺失 (https://... | data:...) 链接。
+        常见于 grok-4.x 等通用对话模型被禁用工具调用后只能输出占位文本。
+        """
+        try:
+            if not isinstance(resp, dict):
+                return False
+            choices = resp.get("choices", [])
+            if not isinstance(choices, list) or not choices:
+                return False
+            msg = (choices[0] or {}).get("message", {}) or {}
+            content = msg.get("content", "")
+            if not isinstance(content, str):
+                return False
+            if re.search(r"!\[[^\]]*\]\(\)", content):
+                return True
+            if re.search(r"!\[[^\]]*\]", content) and not re.search(
+                r"!\[[^\]]*\]\((https?://|data:)", content
+            ):
+                return True
+            return False
+        except Exception:
+            return False
+
+    @staticmethod
+    def _placeholder_failure_message() -> str:
+        return (
+            "❌ 当前对话模型只返回了图片占位符（未实际生成媒体）。\n"
+            "通用对话模型（如 grok-4.x）生图依赖工具调用，当前链路未启用。\n"
+            "建议改用 grok-composer-* 等支持直接出图的对话生图模型。"
+        )
+
+    @staticmethod
     def _unsupported_size_message(invalid_size: str) -> str:
         return (
             f"❌ 尺寸不支持: {invalid_size}\n"
@@ -515,6 +550,10 @@ class TaskService:
                         )
                         return
 
+                    if self._is_markdown_placeholder_response(resp):
+                        await self.send_service.reply_error(event, self._placeholder_failure_message())
+                        return
+
                     urls, perr = self.media_service.extract_media_url_from_chat_response(resp)
 
                 else:
@@ -581,6 +620,10 @@ class TaskService:
                             event,
                             "❌ 当前模型返回了工具调用卡片（未实际生成媒体）。\n请更换图生图模型提供商。"
                         )
+                        return
+
+                    if self._is_markdown_placeholder_response(resp):
+                        await self.send_service.reply_error(event, self._placeholder_failure_message())
                         return
 
                     urls, perr = self.media_service.extract_media_url_from_chat_response(resp)
@@ -757,6 +800,10 @@ class TaskService:
                             event,
                             "❌ 当前模型返回了工具调用卡片（未实际生成媒体）。\n请更换视频模型提供商。"
                         )
+                        return
+
+                    if self._is_markdown_placeholder_response(resp):
+                        await self.send_service.reply_error(event, self._placeholder_failure_message())
                         return
 
                     urls, perr = self.media_service.extract_media_url_from_chat_response(resp)
