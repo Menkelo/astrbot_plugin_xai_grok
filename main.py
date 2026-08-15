@@ -48,6 +48,22 @@ class GrokMediaPlugin(Star):
         if self.video_default_resolution not in ("480p", "720p", "1080p"):
             self.video_default_resolution = ""
 
+        # 媒体生成渠道（Console/Web/Build/auto），图片与视频分开控制
+        # 默认 Console（保持旧行为）；官方砍掉 console 生图/视频后，可在配置面板切到 Web 等可用渠道
+        self._valid_routes = ("console", "web", "build", "auto")
+
+        def _parse_route(key: str) -> str:
+            try:
+                r = str(config.get(key, "") or "").strip().lower()
+            except Exception:
+                r = ""
+            if r not in self._valid_routes:
+                return "console"
+            return r
+
+        self.image_media_route = _parse_route("image_media_route")
+        self.video_media_route = _parse_route("video_media_route")
+
         self.timeout_seconds = 180
         self.max_image_size = 5 * 1024 * 1024
         self.save_video_enabled = False
@@ -89,7 +105,9 @@ class GrokMediaPlugin(Star):
             f"image={self.image_provider_id or '-'}, "
             f"video={self.video_provider_id or '-'}, "
             f"video_default_duration={self.video_default_duration or 'default'}, "
-            f"video_default_resolution={self.video_default_resolution or 'default'}"
+            f"video_default_resolution={self.video_default_resolution or 'default'}, "
+            f"image_route={self.image_media_route}, "
+            f"video_route={self.video_media_route}"
         )
 
     async def on_unload(self):

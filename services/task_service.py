@@ -51,15 +51,31 @@ class TaskService:
             return self.plugin.video_provider_id or ""
         return self.plugin.image_provider_id or ""
 
-    # Grok2API 媒体生成统一走 Console 路由（Grok2API 后端按 Build>Web>Console 展开
-    # 无前缀模型候选并优先选中 Web，Web 图生图常被上游 403 掩码为 503；
-    # 插件只面向 Console 路由，模型名统一带 Console/ 前缀）。
+    # 媒体生成渠道由配置面板控制（image_media_route / video_media_route）。
+    # 默认 Console（Grok2API 后端按 Build>Web>Console 展开无前缀模型候选并优先选中 Web，
+    # Web 图生图曾常被上游 403 掩码为 503）；官方砍掉 console 生图/视频后可临时切到 Web/Build。
+
+    def _plugin_media_route(self, task_type: str) -> str:
+        """返回配置面板设置的媒体渠道（console/web/build/auto），未配置时默认 console。"""
+        conf = getattr(self.plugin, "config", {}) or {}
+        if task_type == "video":
+            raw = conf.get("video_media_route")
+            if raw is None:
+                raw = getattr(self.plugin, "video_media_route", None)
+        else:
+            raw = conf.get("image_media_route")
+            if raw is None:
+                raw = getattr(self.plugin, "image_media_route", None)
+        route = str(raw or "").strip().lower()
+        if route not in ("console", "web", "build", "auto"):
+            return "console"
+        return route
 
     async def _resolve_task_model(self, task_type: str, model: str, base_url: str, api_key: str) -> str:
-        """强制将 imagine 媒体模型统一为 Console 路由。
+        """按配置渠道为 imagine 媒体模型补/替换前缀（Console/Web/Build）。
 
-        Grok2API 后端按 Build>Web>Console 优先级展开无前缀模型名候选并优先选中 Web 路由；
-        插件只面向 Console 路由，因此对 imagine 系列模型统一补 Console/ 前缀。
+        渠道由配置面板 image_media_route / video_media_route 控制；
+        auto 时保留模型名原样，交由 Grok2API 后端按 Build>Web>Console 优先级展开。
         已带前缀或非 imagine 模型保持原样。
         """
         _ = (base_url, api_key, task_type)
@@ -67,7 +83,7 @@ class TaskService:
             return model
         if "imagine" not in str(model).strip().lower():
             return model
-        return self._console_route_model(model)
+        return self._route_model(model, self._plugin_media_route(task_type))
 
     @staticmethod
     def _is_chat_image_model(model: str) -> bool:
@@ -110,20 +126,23 @@ class TaskService:
         return ""
 
     @staticmethod
-    def _console_route_model(model: str) -> str:
-        """媒体生成统一走 Console 路由：给模型名补/替换为 Console/ 前缀。
+    def _route_model(model: str, route: str) -> str:
+        """媒体生成按配置渠道补/替换前缀（Console/Web/Build）。
 
-        Grok2API 后端按 Build>Web>Console 优先级展开无前缀模型名候选，会优先选中 Web 路由；
-        Web 上游对图生图常返回 403（被掩码为 503）。统一带 Console/ 前缀可强制选中 Console 路由。
+        route 为 console/web/build 时强制使用该前缀（已带其他前缀则替换）；
+        route 为 auto 时保留模型名原样（含已有前缀），交由后端按 Build>Web>Console 展开。
         """
+        route = str(route or "").strip().lower()
+        if route not in ("console", "web", "build"):
+            return str(model or "")
         m = str(model or "").strip()
         if not m:
             return m
         prefix = TaskService._model_provider_prefix(m)
         if prefix:
             rest = m.split("/", 1)[1].strip()
-            return f"Console/{rest}"
-        return f"Console/{m}"
+            return f"{route.capitalize()}/{rest}"
+        return f"{route.capitalize()}/{m}"
 
     @staticmethod
     def _is_imagine_video_model(model: str) -> bool:
@@ -435,8 +454,9 @@ class TaskService:
                 runtime.api_key
             )
             if resolved_model and resolved_model != runtime.model:
+                route = self._plugin_media_route(task_type)
                 logger.warning(
-                    f"任务路由: Console 路由 {runtime.model} → {resolved_model}（task_type={task_type}）"
+                    f"任务路由: 渠道[{route}] {runtime.model} → {resolved_model}（task_type={task_type}）"
                 )
                 runtime.model = resolved_model
 

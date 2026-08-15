@@ -54,7 +54,7 @@
 - 图片生成/编辑固定使用 2K 画质（`resolution: 2k` 透传 Grok2API）
 - 图生视频指定与原图不同的比例时，参考图会先做等比画布适配，避免被后端拉伸
 - 图生视频未指定比例时，自动按参考图实际比例生成（就近映射到 `1:1 / 2:3 / 3:2 / 4:3 / 3:4 / 16:9 / 9:16`），不会默认 16:9
-- 所有 imagine 媒体请求统一走 Console 上游（模型自动带 `Console/` 前缀）；请求重试由 Grok2API 后端管理，插件单次调用
+- imagine 媒体请求按配置渠道自动带 `Console/` / `Web/` / `Build/` 前缀（见下方「媒体渠道配置」）；请求重试由 Grok2API 后端管理，插件单次调用
 - `grok-imagine-video*` 系列走 Grok2API 新版 `/v1/videos/generations` 异步任务链路
   - 支持 `1-15s` 时长（透传 `duration`；未指定时使用配置面板的「视频默认时长」滑动条，未设置则后端决定）
   - 支持比例透传 `aspect_ratio`（`1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3`）
@@ -175,6 +175,8 @@
 - `video_provider_id`：视频模型提供商（select_provider，文生视频 / 图生视频共用）
 - `video_default_duration`：视频默认时长（秒，滑动条 1-15s，提示词未指定时长时使用）
 - `video_default_resolution`：视频默认格式（下拉 480p/720p/1080p，提示词未指定格式时使用）
+- `image_media_route`：图片生成渠道（下拉 `Console/Web/Build/auto`，文生图/图生图共用）
+- `video_media_route`：视频生成渠道（下拉 `Console/Web/Build/auto`，文生视频/图生视频共用）
 
 ---
 
@@ -212,13 +214,20 @@
 | 图生图 | `grok-imagine-image-edit`、`grok-imagine-image`、`grok-imagine-image-quality` | `/v1/images/edits`（JSON，参考图 `image.url`） |
 | 对话生图 | `grok-4.3`、`grok-4.5`、`grok-4.20-0309-reasoning`、`grok-4.20-multi-agent-0309`、`grok-chat-fast/auto/expert/heavy`、`grok-build-0.1`、`grok-composer-2.5-fast` | `/v1/chat/completions` |
 
-### Console 路由（媒体生成统一走 Console 上游）
+### 媒体渠道配置（Console / Web / Build / auto）
 
-插件面向 Grok2API 的 **Console provider** 账号池，所有 imagine 系列媒体生成模型在请求时统一携带 `Console/` 前缀：
+插件通过配置面板的 `image_media_route`（图片）与 `video_media_route`（视频）控制 imagine 媒体模型的上游渠道前缀：
 
-- 例如配置模型 `grok-imagine-image` 会以 `Console/grok-imagine-image` 发送，强制选中 Console 路由
-- 原因：Grok2API 后端按 `Build > Web > Console` 优先级展开无前缀模型名候选，优先选中 Web 路由，而 Web 上游对图生图常返回 403（被掩码为 503）
-- 已带其他前缀（`Web/`、`Build/`）的模型会自动替换为 `Console/` 前缀
+- `Console`：强制带 `Console/` 前缀（默认，保持旧行为）
+- `Web`：强制带 `Web/` 前缀
+- `Build`：强制带 `Build/` 前缀
+- `auto`：保留模型名原样（含已有前缀），交由 Grok2API 后端按 `Build > Web > Console` 优先级展开
+
+说明：
+
+- 默认 `Console` 的原因：Grok2API 后端按 `Build > Web > Console` 优先级展开无前缀模型名候选，会优先选中 Web 路由，而 Web 上游对图生图曾常返回 403（被掩码为 503）
+- 官方砍掉 console 渠道的生图/视频后，可在配置面板把对应渠道切到 `Web` 或 `Build` 临时恢复（当前 Web 生图可用）
+- 已带其他前缀（`Web/`、`Build/`）的模型会自动替换为所选前缀
 - 对话类模型（`grok-4.x` / `grok-chat-*` 等）不做改写
 
 > 请求重试由 Grok2API 后端负责，插件每次请求只发起单次调用。

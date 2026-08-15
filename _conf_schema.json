@@ -24,5 +24,19 @@
     "default": "720p",
     "options": ["480p", "720p", "1080p"],
     "hint": "提示词未指定 480p/720p/1080p 时使用的默认视频格式。注意：Console 上游 grok-imagine-video 仅支持 480p/720p，选择 1080p 时可能被后端拒绝"
+  },
+  "image_media_route": {
+    "description": "图片生成渠道",
+    "type": "string",
+    "default": "Console",
+    "options": ["Console", "Web", "Build", "auto"],
+    "hint": "文生图/图生图请求强制使用的上游渠道前缀。Console=官方控制台；Web=网页端（官方砍掉 console 生图后可用）；Build=构建端；auto=保留模型名原样不强制前缀。Grok2API 后端会按 Build>Web>Console 优先级展开无前缀模型候选"
+  },
+  "video_media_route": {
+    "description": "视频生成渠道",
+    "type": "string",
+    "default": "Console",
+    "options": ["Console", "Web", "Build", "auto"],
+    "hint": "文生视频/图生视频请求强制使用的上游渠道前缀。Console=官方控制台；Web=网页端；Build=构建端；auto=保留模型名原样不强制前缀。官方砍掉 console 视频后请切换到可用渠道"
   }
 }
