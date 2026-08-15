@@ -1,3 +1,13 @@
+# [v1.1.23] - 修复图生图 base64 图片 MIME 标记错误
+
+* **🐛 对话图片 Content-Type 与实际内容不一致（400）**
+  * 根因：`_format_base64` 把不带 `data:` 前缀的 base64 一律写死为 `data:image/jpeg;base64,...`，而 PNG/WebP/GIF 等未超限图片原样透传时内容仍是原格式，Grok2API 校验 MIME 与字节不符报 400
+  * 修复：按字节魔数探测真实格式（JPEG/PNG/GIF/WebP/BMP），生成正确的 `data:<mime>;base64,` 前缀
+  * 已带 `data:` 前缀但标记错误的 base64 也会被重新探测修正
+  * 影响链路：对话模型图生图（chat/completions 携带参考图）、URL 参考图转 base64、Pillow 不可用时的原图透传
+
+---
+
 # [v1.1.22] - Web 渠道图片分辨率锁定 1k
 
 * **🖼️ Web 渠道图片生成/编辑锁定 resolution=1k**
