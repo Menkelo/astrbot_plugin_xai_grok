@@ -36,12 +36,21 @@ class ApiClient:
         url = self.endpoint(base_url, "chat/completions")
 
         if allow_tools:
-            strict_prompt = (
-                "Generate media result. "
-                "If a media generation tool is available, use it to produce the actual media "
-                "and return the final media output.\n\n"
-                f"{prompt}"
-            )
+            if image_base64:
+                strict_prompt = (
+                    "A reference image is attached. Use the image generation/editing tool "
+                    "to apply the requested edit to the reference image IMMEDIATELY. "
+                    "Do NOT ask questions, do NOT ask for confirmation, do NOT explain or describe. "
+                    "Return only the final generated media.\n\n"
+                    f"{prompt}"
+                )
+            else:
+                strict_prompt = (
+                    "Use the image generation tool to generate the requested image IMMEDIATELY. "
+                    "Do NOT ask questions, do NOT ask for confirmation, do NOT explain or describe. "
+                    "Return only the final generated media.\n\n"
+                    f"{prompt}"
+                )
         else:
             strict_prompt = (
                 "Generate media result directly. "
