@@ -1,3 +1,13 @@
+# [v1.1.26] - 图片对话链路放开工具调用（修复对话模型生图返回占位符）
+
+* **🔧 对话模型生图启用 imagine 工具调用**
+  * 根因：`call_chat` 写死 `tool_choice: "none"` + "禁止调用工具" 的 strict_prompt，而 Grok 对话模型（grok-4.x / grok-composer-*）生图必须调用 imagine 工具，导致模型只返回 `![描述]` 占位符
+  * 修复：`call_chat` 新增 `allow_tools` 参数；文生图/图生图的对话模型链路传 `True`，放开工具调用并引导模型使用生图工具返回媒体
+  * 视频 chat 兜底链路保持 `allow_tools=False`（行为不变）
+  * 配 `image_edit_chat_fallback_model` 的图生图降级链路同样生效
+
+---
+
 # [v1.1.25] - 识别对话模型"图片占位符"并给出明确提示
 
 * **🔍 拦截无 URL 的 markdown 图片占位符响应**

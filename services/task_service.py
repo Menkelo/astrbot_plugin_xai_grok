@@ -537,7 +537,8 @@ class TaskService:
                         model=runtime.model,
                         base_url=runtime.base_url,
                         api_key=runtime.api_key,
-                        aspect_ratio=None
+                        aspect_ratio=None,
+                        allow_tools=True
                     )
                     if error:
                         await self.send_service.reply_error(event, f"❌ {error}")
@@ -609,7 +610,8 @@ class TaskService:
                         model=runtime.model,
                         base_url=runtime.base_url,
                         api_key=runtime.api_key,
-                        aspect_ratio=None
+                        aspect_ratio=None,
+                        allow_tools=True
                     )
                     if error:
                         await self.send_service.reply_error(event, f"❌ {error}")
