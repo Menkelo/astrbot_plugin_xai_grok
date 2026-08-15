@@ -77,17 +77,36 @@ class TaskService:
             return "1k"
         return "2k"
 
+    def _edit_chat_fallback_model(self) -> str:
+        """返回配置的图生图备用对话模型（image_edit_chat_fallback_model），未配置返回空串。"""
+        conf = getattr(self.plugin, "config", {}) or {}
+        raw = conf.get("image_edit_chat_fallback_model")
+        if raw is None:
+            raw = getattr(self.plugin, "image_edit_chat_fallback_model", None)
+        return str(raw or "").strip()
+
     async def _resolve_task_model(self, task_type: str, model: str, base_url: str, api_key: str) -> str:
         """按配置渠道为 imagine 媒体模型补/替换前缀（Console/Web/Build）。
 
         渠道由配置面板 image_media_route / video_media_route 控制；
         auto 时保留模型名原样，交由 Grok2API 后端按 Build>Web>Console 优先级展开。
+        图生图在 Web/Build 渠道下若配置了备用对话模型，自动降级走 chat/completions 链路。
         已带前缀或非 imagine 模型保持原样。
         """
         _ = (base_url, api_key, task_type)
         if not model:
             return model
-        if "imagine" not in str(model).strip().lower():
+        is_imagine = "imagine" in str(model).strip().lower()
+        if task_type == "edit" and is_imagine:
+            route = self._plugin_media_route(task_type)
+            fallback = self._edit_chat_fallback_model()
+            if fallback and route in ("web", "build"):
+                logger.warning(
+                    f"任务路由: 图生图降级到对话模型 {model} → {fallback}"
+                    f"（渠道[{route}]下 imagine edits 常被上游 403）"
+                )
+                return fallback
+        if not is_imagine:
             return model
         return self._route_model(model, self._plugin_media_route(task_type))
 

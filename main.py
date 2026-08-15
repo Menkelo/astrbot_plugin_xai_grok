@@ -64,6 +64,15 @@ class GrokMediaPlugin(Star):
         self.image_media_route = _parse_route("image_media_route")
         self.video_media_route = _parse_route("video_media_route")
 
+        # 图生图备用对话模型（可选）：Web/Build 渠道下 imagine edits 接口常被上游 403，
+        # 配置后图生图自动改用该对话模型走 chat/completions 链路
+        try:
+            self.image_edit_chat_fallback_model = str(
+                config.get("image_edit_chat_fallback_model", "") or ""
+            ).strip()
+        except Exception:
+            self.image_edit_chat_fallback_model = ""
+
         self.timeout_seconds = 180
         self.max_image_size = 5 * 1024 * 1024
         self.save_video_enabled = False
@@ -107,7 +116,8 @@ class GrokMediaPlugin(Star):
             f"video_default_duration={self.video_default_duration or 'default'}, "
             f"video_default_resolution={self.video_default_resolution or 'default'}, "
             f"image_route={self.image_media_route}, "
-            f"video_route={self.video_media_route}"
+            f"video_route={self.video_media_route}, "
+            f"edit_fallback={self.image_edit_chat_fallback_model or '-'}"
         )
 
     async def on_unload(self):

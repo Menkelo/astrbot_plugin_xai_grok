@@ -1,3 +1,12 @@
+# [v1.1.24] - 图生图在 Web/Build 渠道自动降级到对话模型
+
+* **🛟 新增图生图备用对话模型（`image_edit_chat_fallback_model`）**
+  * `Web` / `Build` 上游对 imagine `edits`（图生图）接口均常返回 403，属上游渠道限制，文生图不受影响
+  * 配置备用对话模型（如 `grok-4.6` / `grok-composer-2.5-fast`，填后端对外模型名不带前缀）后，图生图在 `web`/`build` 渠道自动改用该模型走 `/v1/chat/completions` 链路
+  * 文生图仍走原 imagine 模型；`console` 渠道不触发降级，保持原 edits 链路
+
+---
+
 # [v1.1.23] - 修复图生图 base64 图片 MIME 标记错误
 
 * **🐛 对话图片 Content-Type 与实际内容不一致（400）**

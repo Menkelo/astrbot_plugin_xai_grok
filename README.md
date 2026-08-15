@@ -177,6 +177,7 @@
 - `video_default_resolution`：视频默认格式（下拉 480p/720p/1080p，提示词未指定格式时使用）
 - `image_media_route`：图片生成渠道（下拉 `Console/Web/Build/auto`，文生图/图生图共用）
 - `video_media_route`：视频生成渠道（下拉 `Console/Web/Build/auto`，文生视频/图生视频共用）
+- `image_edit_chat_fallback_model`：图生图备用对话模型（可留空，填后端对外模型名不带前缀）
 
 ---
 
@@ -227,6 +228,7 @@
 
 - 默认 `Console` 的原因：Grok2API 后端按 `Build > Web > Console` 优先级展开无前缀模型名候选，会优先选中 Web 路由，而 Web 上游对图生图曾常返回 403（被掩码为 503）
 - 官方砍掉 console 渠道的生图/视频后，可在配置面板把对应渠道切到 `Web` 或 `Build` 临时恢复（当前 Web 生图可用）
+- **图生图注意**：`Web` / `Build` 上游对 imagine `edits` 接口均常返回 403（上游渠道限制，文生图 `generations` 不受影响）。可配置 `image_edit_chat_fallback_model` 备用对话模型（如 `grok-4.6` / `grok-composer-2.5-fast`），图生图在该渠道下自动改用对话模型走 `/v1/chat/completions` 链路；文生图仍走原 imagine 模型
 - 已带其他前缀（`Web/`、`Build/`）的模型会自动替换为所选前缀
 - 对话类模型（`grok-4.x` / `grok-chat-*` 等）不做改写
 
