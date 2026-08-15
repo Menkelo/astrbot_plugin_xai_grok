@@ -85,6 +85,11 @@ class TaskService:
             raw = getattr(self.plugin, "image_edit_chat_fallback_model", None)
         return str(raw or "").strip()
 
+    @staticmethod
+    def _is_composer_model(model: str) -> bool:
+        """是否 grok-composer-* 生图专用对话模型（后端绑定生图工具）。"""
+        return "composer" in str(model or "").strip().lower()
+
     async def _resolve_task_model(self, task_type: str, model: str, base_url: str, api_key: str) -> str:
         """按配置渠道为 imagine 媒体模型补/替换前缀（Console/Web/Build）。
 
@@ -101,6 +106,12 @@ class TaskService:
             route = self._plugin_media_route(task_type)
             fallback = self._edit_chat_fallback_model()
             if fallback and route in ("web", "build"):
+                if not self._is_composer_model(fallback):
+                    logger.warning(
+                        f"任务路由: 图生图降级到对话模型 {model} → {fallback}。"
+                        f"警告: {fallback} 不是 grok-composer-* 生图模型，"
+                        f"后端未绑定生图工具，无法出图，请改用 grok-composer-2.5-fast"
+                    )
                 logger.warning(
                     f"任务路由: 图生图降级到对话模型 {model} → {fallback}"
                     f"（渠道[{route}]下 imagine edits 常被上游 403）"
@@ -530,6 +541,11 @@ class TaskService:
                 # 文生图按模型路由：对话模型走 chat/completions，图片模型走 generations
                 if self._is_chat_image_model(runtime.model):
                     logger.info(f"任务路由: task_type=image, api=chat/completions, model={runtime.model}")
+                    if not self._is_composer_model(runtime.model):
+                        logger.warning(
+                            f"任务路由: {runtime.model} 不是 grok-composer-* 生图模型，"
+                            f"后端未绑定生图工具，对话生图将失败，请改用 grok-composer-2.5-fast"
+                        )
 
                     resp, error = await self.api_client.call_chat(
                         prompt=prompt,
@@ -603,6 +619,11 @@ class TaskService:
                         f"任务路由: task_type=edit, api=chat/completions, "
                         f"model={runtime.model}, mode=i2i(chat)"
                     )
+                    if not self._is_composer_model(runtime.model):
+                        logger.warning(
+                            f"任务路由: {runtime.model} 不是 grok-composer-* 生图模型，"
+                            f"后端未绑定生图工具，对话图生图将失败，请改用 grok-composer-2.5-fast"
+                        )
 
                     resp, error = await self.api_client.call_chat(
                         prompt=edit_prompt_clean,
