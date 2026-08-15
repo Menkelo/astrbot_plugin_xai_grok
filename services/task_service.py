@@ -72,52 +72,22 @@ class TaskService:
         return route
 
     def _image_resolution(self, task_type: str) -> str:
-        """图片生成/编辑分辨率：Web 渠道锁定 1k（官方 Grok Web 图片接口仅支持 1k），其余渠道 2k。"""
-        if self._plugin_media_route(task_type) == "web":
+        """图片编辑分辨率：Web 渠道图生图锁定 1k（官方 Grok Web 图生图仅支持 1k），文生图及其余渠道 2k。"""
+        if self._plugin_media_route(task_type) == "web" and task_type == "edit":
             return "1k"
         return "2k"
-
-    def _edit_chat_fallback_model(self) -> str:
-        """返回配置的图生图备用对话模型（image_edit_chat_fallback_model），未配置返回空串。"""
-        conf = getattr(self.plugin, "config", {}) or {}
-        raw = conf.get("image_edit_chat_fallback_model")
-        if raw is None:
-            raw = getattr(self.plugin, "image_edit_chat_fallback_model", None)
-        return str(raw or "").strip()
-
-    @staticmethod
-    def _is_composer_model(model: str) -> bool:
-        """是否 grok-composer-* 生图专用对话模型（后端绑定生图工具）。"""
-        return "composer" in str(model or "").strip().lower()
 
     async def _resolve_task_model(self, task_type: str, model: str, base_url: str, api_key: str) -> str:
         """按配置渠道为 imagine 媒体模型补/替换前缀（Console/Web/Build）。
 
         渠道由配置面板 image_media_route / video_media_route 控制；
         auto 时保留模型名原样，交由 Grok2API 后端按 Build>Web>Console 优先级展开。
-        图生图在 Web/Build 渠道下若配置了备用对话模型，自动降级走 chat/completions 链路。
         已带前缀或非 imagine 模型保持原样。
         """
         _ = (base_url, api_key, task_type)
         if not model:
             return model
-        is_imagine = "imagine" in str(model).strip().lower()
-        if task_type == "edit" and is_imagine:
-            route = self._plugin_media_route(task_type)
-            fallback = self._edit_chat_fallback_model()
-            if fallback and route in ("web", "build"):
-                if not self._is_composer_model(fallback):
-                    logger.warning(
-                        f"任务路由: 图生图降级到对话模型 {model} → {fallback}。"
-                        f"警告: {fallback} 不是 grok-composer-* 生图模型，"
-                        f"后端未绑定生图工具，无法出图，请改用 grok-composer-2.5-fast"
-                    )
-                logger.warning(
-                    f"任务路由: 图生图降级到对话模型 {model} → {fallback}"
-                    f"（渠道[{route}]下 imagine edits 常被上游 403）"
-                )
-                return fallback
-        if not is_imagine:
+        if "imagine" not in str(model).strip().lower():
             return model
         return self._route_model(model, self._plugin_media_route(task_type))
 
@@ -204,41 +174,6 @@ class TaskService:
             return isinstance(content, str) and "<xai:tool_usage_card>" in content
         except Exception:
             return False
-
-    @staticmethod
-    def _is_markdown_placeholder_response(resp: dict) -> bool:
-        """检测对话模型只返回了无 URL 的 markdown 图片占位符（未实际生成媒体）。
-
-        典型：content 为 `![描述]` 或 `![描述]()`，但缺失 (https://... | data:...) 链接。
-        常见于 grok-4.x 等通用对话模型被禁用工具调用后只能输出占位文本。
-        """
-        try:
-            if not isinstance(resp, dict):
-                return False
-            choices = resp.get("choices", [])
-            if not isinstance(choices, list) or not choices:
-                return False
-            msg = (choices[0] or {}).get("message", {}) or {}
-            content = msg.get("content", "")
-            if not isinstance(content, str):
-                return False
-            if re.search(r"!\[[^\]]*\]\(\)", content):
-                return True
-            if re.search(r"!\[[^\]]*\]", content) and not re.search(
-                r"!\[[^\]]*\]\((https?://|data:)", content
-            ):
-                return True
-            return False
-        except Exception:
-            return False
-
-    @staticmethod
-    def _placeholder_failure_message() -> str:
-        return (
-            "❌ 当前对话模型未实际生成媒体（仅返回占位符/追问文本）。\n"
-            "通用对话模型（如 grok-4.x）在后端没有绑定生图工具，无法出图。\n"
-            "请在 image_edit_chat_fallback_model 配置 grok-composer-* 系列生图模型。"
-        )
 
     @staticmethod
     def _unsupported_size_message(invalid_size: str) -> str:
@@ -541,11 +476,6 @@ class TaskService:
                 # 文生图按模型路由：对话模型走 chat/completions，图片模型走 generations
                 if self._is_chat_image_model(runtime.model):
                     logger.info(f"任务路由: task_type=image, api=chat/completions, model={runtime.model}")
-                    if not self._is_composer_model(runtime.model):
-                        logger.warning(
-                            f"任务路由: {runtime.model} 不是 grok-composer-* 生图模型，"
-                            f"后端未绑定生图工具，对话生图将失败，请改用 grok-composer-2.5-fast"
-                        )
 
                     resp, error = await self.api_client.call_chat(
                         prompt=prompt,
@@ -553,8 +483,7 @@ class TaskService:
                         model=runtime.model,
                         base_url=runtime.base_url,
                         api_key=runtime.api_key,
-                        aspect_ratio=None,
-                        allow_tools=True
+                        aspect_ratio=None
                     )
                     if error:
                         await self.send_service.reply_error(event, f"❌ {error}")
@@ -565,10 +494,6 @@ class TaskService:
                             event,
                             "❌ 当前模型返回了工具调用卡片（未实际生成媒体）。\n请更换生图模型提供商。"
                         )
-                        return
-
-                    if self._is_markdown_placeholder_response(resp):
-                        await self.send_service.reply_error(event, self._placeholder_failure_message())
                         return
 
                     urls, perr = self.media_service.extract_media_url_from_chat_response(resp)
@@ -619,11 +544,6 @@ class TaskService:
                         f"任务路由: task_type=edit, api=chat/completions, "
                         f"model={runtime.model}, mode=i2i(chat)"
                     )
-                    if not self._is_composer_model(runtime.model):
-                        logger.warning(
-                            f"任务路由: {runtime.model} 不是 grok-composer-* 生图模型，"
-                            f"后端未绑定生图工具，对话图生图将失败，请改用 grok-composer-2.5-fast"
-                        )
 
                     resp, error = await self.api_client.call_chat(
                         prompt=edit_prompt_clean,
@@ -631,8 +551,7 @@ class TaskService:
                         model=runtime.model,
                         base_url=runtime.base_url,
                         api_key=runtime.api_key,
-                        aspect_ratio=None,
-                        allow_tools=True
+                        aspect_ratio=None
                     )
                     if error:
                         await self.send_service.reply_error(event, f"❌ {error}")
@@ -643,10 +562,6 @@ class TaskService:
                             event,
                             "❌ 当前模型返回了工具调用卡片（未实际生成媒体）。\n请更换图生图模型提供商。"
                         )
-                        return
-
-                    if self._is_markdown_placeholder_response(resp):
-                        await self.send_service.reply_error(event, self._placeholder_failure_message())
                         return
 
                     urls, perr = self.media_service.extract_media_url_from_chat_response(resp)
@@ -823,10 +738,6 @@ class TaskService:
                             event,
                             "❌ 当前模型返回了工具调用卡片（未实际生成媒体）。\n请更换视频模型提供商。"
                         )
-                        return
-
-                    if self._is_markdown_placeholder_response(resp):
-                        await self.send_service.reply_error(event, self._placeholder_failure_message())
                         return
 
                     urls, perr = self.media_service.extract_media_url_from_chat_response(resp)

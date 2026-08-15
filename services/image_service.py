@@ -87,37 +87,11 @@ class ImageService:
             return None
 
     @staticmethod
-    def _detect_image_mime(data: bytes) -> str:
-        """根据图片字节魔数判断真实 MIME，未知时回退 jpeg。"""
-        if data[:3] == b"\xff\xd8\xff":
-            return "image/jpeg"
-        if data[:8] == b"\x89PNG\r\n\x1a\n":
-            return "image/png"
-        if data[:6] in (b"GIF87a", b"GIF89a"):
-            return "image/gif"
-        if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-            return "image/webp"
-        if data[:2] == b"BM":
-            return "image/bmp"
-        return "image/jpeg"
-
-    @staticmethod
     def _format_base64(base64_str: str) -> str:
         base64_str = base64_str.replace("\n", "").replace("\r", "")
-        data_part = base64_str
-        if base64_str.startswith("data:"):
-            if ";base64," in base64_str:
-                data_part = base64_str.split(";base64,", 1)[1]
-            elif "," in base64_str:
-                data_part = base64_str.split(",", 1)[1]
-            else:
-                data_part = base64_str
-        try:
-            data = base64.b64decode(data_part)
-            mime = ImageService._detect_image_mime(data)
-        except Exception:
-            mime = "image/jpeg"
-        return f"data:{mime};base64,{data_part}"
+        if not base64_str.startswith("data:"):
+            return f"data:image/jpeg;base64,{base64_str}"
+        return base64_str
 
     @staticmethod
     def _fit_image_to_aspect(img, target_ratio: float):

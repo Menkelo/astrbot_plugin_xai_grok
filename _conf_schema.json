@@ -32,11 +32,6 @@
     "options": ["Console", "Web", "Build", "auto"],
     "hint": "文生图/图生图请求强制使用的上游渠道前缀。Console=官方控制台；Web=网页端（官方砍掉 console 生图后可用）；Build=构建端；auto=保留模型名原样不强制前缀。Grok2API 后端会按 Build>Web>Console 优先级展开无前缀模型候选"
   },
-  "image_edit_chat_fallback_model": {
-    "description": "图生图备用对话模型（可留空）",
-    "type": "string",
-    "hint": "Web/Build 渠道下 imagine edits 接口常被上游 403。填入后端可用的对话生图模型名（如 grok-4.6 / grok-composer-2.5-fast，填对外模型名不带前缀）后，图生图自动改用该模型走 /v1/chat/completions 链路，文生图仍用原 imagine 模型"
-  },
   "video_media_route": {
     "description": "视频生成渠道",
     "type": "string",

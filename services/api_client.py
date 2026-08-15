@@ -25,37 +25,20 @@ class ApiClient:
         aspect_ratio: Optional[str] = None,
         duration_seconds: Optional[int] = None,
         video_size: Optional[str] = None,
-        resolution: Optional[str] = None,
-        allow_tools: bool = False
+        resolution: Optional[str] = None
     ) -> Tuple[Optional[dict], Optional[str]]:
         """
         用于视频等 chat/completions
         视频支持 aspect_ratio / size / seconds / resolution
-        allow_tools=True 时放开工具调用（Grok 对话模型生图依赖 imagine 工具调用）。
         """
         url = self.endpoint(base_url, "chat/completions")
 
-        if allow_tools:
-            if image_base64:
-                strict_prompt = (
-                    "An image is attached as reference. Please use the media generation tool "
-                    "to apply the requested edit to the reference image and return the final "
-                    "generated media output.\n\n"
-                    f"{prompt}"
-                )
-            else:
-                strict_prompt = (
-                    "Please use the media generation tool to generate the requested image "
-                    "and return the final generated media output.\n\n"
-                    f"{prompt}"
-                )
-        else:
-            strict_prompt = (
-                "Generate media result directly. "
-                "Do NOT call any tools/functions/chatroom actions. "
-                "Return only final media output.\n\n"
-                f"{prompt}"
-            )
+        strict_prompt = (
+            "Generate media result directly. "
+            "Do NOT call any tools/functions/chatroom actions. "
+            "Return only final media output.\n\n"
+            f"{prompt}"
+        )
 
         content = [{"type": "text", "text": strict_prompt}]
         if image_base64:
@@ -65,9 +48,8 @@ class ApiClient:
             "model": model,
             "messages": [{"role": "user", "content": content}],
             "stream": False,
+            "tool_choice": "none"
         }
-        if not allow_tools:
-            payload["tool_choice"] = "none"
 
         video_config = {}
 

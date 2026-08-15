@@ -1,67 +1,10 @@
-# [v1.1.29] - 对话生图链路对非 composer 模型输出警告（快速定位配置错误）
+# [v1.1.22] - Web 渠道图生图分辨率锁定 1k（文生图恢复 2k）
 
-* **⚠️ 路由日志前置告警**
-  * 对话模型文生图/图生图链路以及 imagine→chat 降级链路，若实际使用的模型不是 `grok-composer-*` 系列，输出 `WARN` 日志提示"后端未绑定生图工具，请改用 grok-composer-2.5-fast"
-  * 目的：用户配错 `image_edit_chat_fallback_model` 或直接用 `grok-4.x` 生图时，日志能立即定位根因
-
----
-
-# [v1.1.28] - 缓和对话生图指令（避免触发安全拒绝）并修正模型选型文档
-
-* **🛡️ 移除强指令措辞**
-  * 根因：v1.1.27 的 "IMMEDIATELY / Do NOT ask questions" 强指令被 `grok-4.5` 判定为越狱尝试，直接返回 `Refused`
-  * 修复：`allow_tools=True` 的图生图/文生图引导语改为自然协作语气（"请使用媒体生成工具…返回最终生成结果"），不再触发安全拒绝
-* **📚 明确对话生图仅 `grok-composer-*` 可用**
-  * `grok-4.x` / `grok-chat-*` / `grok-build-0.1` 在后端未绑定生图工具（响应 `num_server_side_tools_used: 0`），无论指令怎么写都无法出图
-  * README / 失败提示统一改为：`image_edit_chat_fallback_model` 必须配置 `grok-composer-*` 系列生图模型
-
----
-
-# [v1.1.27] - 强化对话模型生图指令，强制立即调工具出图（已被 v1.1.28 取代）
-
-* **🧭 图生图/文生图分开写死"立即执行、禁止追问"引导语**
-  * 根因：v1.1.26 放开工具调用后，通用对话模型（如 `grok-4.5`）把"换背景"等改图请求当成多轮对话，先反问确认（`num_server_side_tools_used: 0`），不调 imagine 工具就结束，媒体提取失败
-  * 修复：`allow_tools=True` 时按有无参考图分别注入强指令——有参考图强调"立即对附带的参考图执行编辑，不要询问/确认/解释，只返回最终媒体"；无参考图强调"立即调用生图工具生成，不要询问/解释"
-  * 插件为单次调用无多轮交互，此引导确保模型看到图后直接调工具出图
-
----
-
-# [v1.1.26] - 图片对话链路放开工具调用（修复对话模型生图返回占位符）
-
-* **🔧 对话模型生图启用 imagine 工具调用**
-  * 根因：`call_chat` 写死 `tool_choice: "none"` + "禁止调用工具" 的 strict_prompt，而 Grok 对话模型（grok-4.x / grok-composer-*）生图必须调用 imagine 工具，导致模型只返回 `![描述]` 占位符
-  * 修复：`call_chat` 新增 `allow_tools` 参数；文生图/图生图的对话模型链路传 `True`，放开工具调用并引导模型使用生图工具返回媒体
-  * 视频 chat 兜底链路保持 `allow_tools=False`（行为不变）
-  * 配 `image_edit_chat_fallback_model` 的图生图降级链路同样生效
-
----
-
-# [v1.1.25] - 识别对话模型"图片占位符"并给出明确提示
-
-* **🔍 拦截无 URL 的 markdown 图片占位符响应**
-  * `grok-4.x` 等通用对话模型生图依赖工具调用，当前 chat 链路未启用，模型只会返回 `![描述]` 占位文本而不真正出图
-  * 新增检测：content 匹配 `![alt]` 或 `![alt]()` 但缺少 `(https?:// | data:)` 链接时，判定为"未实际生成媒体"，直接给出可读提示
-  * 提示建议改用 `grok-composer-*` 等支持直接出图的对话生图模型
-  * 文生图 / 图生图 / 视频 chat 链路统一生效；带 URL 的 markdown 图片不受影响
-
----
-
-# [v1.1.24] - 图生图在 Web/Build 渠道自动降级到对话模型
-
-* **🛟 新增图生图备用对话模型（`image_edit_chat_fallback_model`）**
-  * `Web` / `Build` 上游对 imagine `edits`（图生图）接口均常返回 403，属上游渠道限制，文生图不受影响
-  * 配置备用对话模型（如 `grok-4.6` / `grok-composer-2.5-fast`，填后端对外模型名不带前缀）后，图生图在 `web`/`build` 渠道自动改用该模型走 `/v1/chat/completions` 链路
-  * 文生图仍走原 imagine 模型；`console` 渠道不触发降级，保持原 edits 链路
-
----
-
-# [v1.1.23] - 修复图生图 base64 图片 MIME 标记错误
-
-* **🐛 对话图片 Content-Type 与实际内容不一致（400）**
-  * 根因：`_format_base64` 把不带 `data:` 前缀的 base64 一律写死为 `data:image/jpeg;base64,...`，而 PNG/WebP/GIF 等未超限图片原样透传时内容仍是原格式，Grok2API 校验 MIME 与字节不符报 400
-  * 修复：按字节魔数探测真实格式（JPEG/PNG/GIF/WebP/BMP），生成正确的 `data:<mime>;base64,` 前缀
-  * 已带 `data:` 前缀但标记错误的 base64 也会被重新探测修正
-  * 影响链路：对话模型图生图（chat/completions 携带参考图）、URL 参考图转 base64、Pillow 不可用时的原图透传
+* **🔙 回退 v1.1.23~v1.1.29 改动**
+  * 移除图生图 base64 MIME 探测、对话模型降级、占位符检测、工具调用放开等对话生图链路改动，恢复 v1.1.22 行为
+* **🖼️ Web 渠道仅图生图锁定 resolution=1k**
+  * Grok Web 图片接口仅支持 1k，固定传 2k 会返回 400（`Grok Web 图片编辑当前仅支持 resolution=1k`）
+  * `image_media_route=Web` 时，仅图生图（edit）自动透传 `resolution: 1k`；文生图（image）及 Console/Build 渠道保持 2k
 
 ---
 
